@@ -94,6 +94,16 @@ class ChessService : Service(), SideBarHost, SharedPreferences.OnSharedPreferenc
     private var predShownKey: String? = null
     private var predModel: OverlayModel? = null
 
+    // live move labels (the badge on the square the last move went to)
+    private var review: LiveReview? = null
+    private var book: OpeningBook? = null
+    private var lastFen: String? = null                          // the position before the newest one
+    private var pendingJudge: Pair<String, String>? = null       // (position before, move) waiting for its label
+    private var badgeCache: Pair<String, ReviewedMove>? = null   // position key the label belongs to, the label
+    private var badgeNear = IntArray(0)                          // squares around the badge, busy while it glows
+    @Volatile private var badgeNearUntil = 0L
+    private var badgeIdx = -1                                    // the screen square the badge sits on
+
     private enum class Mode { NORMAL, RETHINK, SAVE }
 
     override fun onBind(intent: Intent?): IBinder? = null
@@ -348,6 +358,12 @@ class ChessService : Service(), SideBarHost, SharedPreferences.OnSharedPreferenc
             return
         }
         applyEngineSettings()
+        book = try {
+            assets.open("openings.tsv").bufferedReader().useLines { OpeningBook.parse(it) }
+        } catch (e: Exception) {
+            null
+        }
+        review = LiveReview(stockfish ?: return, book)
         val tr = Tracker(c0.iAmWhite, c0.myTurnAtStart)
         tracker = tr
 
@@ -457,8 +473,10 @@ class ChessService : Service(), SideBarHost, SharedPreferences.OnSharedPreferenc
     private fun justCosmetic(f: Frame): Boolean {
         val last = lastCls ?: return false
         val cls = BoardVision.classify(BoardVision.readSquares(f.px, f.w, f.local)) ?: return false
+        val glowing = SystemClock.elapsedRealtime() < badgeNearUntil
         for (i in 0 until 64) {
             if (i in overlayCrossed) continue // our arrows pass over these, we can't read them now
+            if (glowing && i in badgeNear) continue // the glow of a brilliant move spills over these
             if (i in overlaySquares) {
                 // under our highlight the color can look different, but a piece appearing or leaving is real
                 if ((cls[i] != BoardVision.EMPTY) != (last[i] != BoardVision.EMPTY)) return false
@@ -539,13 +557,29 @@ class ChessService : Service(), SideBarHost, SharedPreferences.OnSharedPreferenc
         val wb = tracker.whiteBottom ?: c.iAmWhite
         val fen = b.fen
         val key = Game.posKey(fen)
-        if (step == Tracker.Step.STARTED) resetGameStats()
+        if (step == Tracker.Step.STARTED) {
+            resetGameStats()
+            review?.newGame(tracker.startFen)
+        }
+        if (step == Tracker.Step.RESET) review?.broken()
         if (key != lastPosKey) {
             // a new position: if exactly one move was played, its accuracy is known once this position has a score
             val before = lastPosKey
             pendingAcc = if (before != null && step == Tracker.Step.MOVED && tracker.lastPlies == 1)
                 Triple(before, key, b.sideToMove == Side.BLACK) else null
             lastPosKey = key
+            // exactly one move was played: it gets a label once the engine has looked at both positions
+            val prevFen = lastFen
+            val last = tracker.playedMoves.lastOrNull()
+            if (prevFen != null && last != null && step == Tracker.Step.MOVED && tracker.lastPlies == 1) {
+                pendingJudge = Pair(prevFen, last)
+            } else {
+                pendingJudge = null
+                badgeCache = null
+                // the very first position of a game has no move before it; any other jump means we missed a move
+                if (prevFen != null) review?.broken()
+            }
+            lastFen = fen
         }
         val g = f.abs
         val myTurn = (b.sideToMove == Side.WHITE) == c.iAmWhite
@@ -559,6 +593,7 @@ class ChessService : Service(), SideBarHost, SharedPreferences.OnSharedPreferenc
         val cached = shownModel
         if (mode == Mode.NORMAL && shownFen == fen && cached != null) {
             showModel(cached)
+            runJudge(g, wb, fen, key, c)
             return step
         }
         val adv = advisor ?: return step
@@ -578,6 +613,7 @@ class ChessService : Service(), SideBarHost, SharedPreferences.OnSharedPreferenc
         ready.clear()
         if (advice.cands.isEmpty()) {
             say("no move found, game over?")
+            runJudge(g, wb, fen, key, c)
             return step
         }
         if (mode == Mode.SAVE && savesLeft > 0) savesLeft--
@@ -618,6 +654,7 @@ class ChessService : Service(), SideBarHost, SharedPreferences.OnSharedPreferenc
         shownFen = fen
         shownModel = model
         showModel(model)
+        runJudge(g, wb, fen, key, c)
         return step
     }
 
@@ -629,16 +666,25 @@ class ChessService : Service(), SideBarHost, SharedPreferences.OnSharedPreferenc
         val cachedPred = predModel
         if (mode == Mode.NORMAL && predShownKey == key && cachedPred != null) {
             showModel(cachedPred)
+            runJudge(g, wb, fen, key, c)
             return
         }
         say("waiting for the opponent...")
-        if (!c.predict && !c.showAcc) return
+        if (!c.predict && !c.showAcc && !c.showLabels) return
         val sf = stockfish ?: return
-        val top = sf.analyse(fen, 250, 1).firstOrNull() ?: return
+        // the review helper remembers its searches, so judging the next move reuses this one
+        val top = (if (c.showLabels) review?.topLine(fen, 250) else null) ?: sf.analyse(fen, 250, 1).firstOrNull()
+        if (top == null) {
+            runJudge(g, wb, fen, key, c)
+            return
+        }
         val whiteToMove = fen.split(" ").getOrNull(1) != "b"
         val evalWhite = if (whiteToMove) top.score else -top.score
         noteEval(key, evalWhite)
-        if (!c.predict) return
+        if (!c.predict) {
+            runJudge(g, wb, fen, key, c)
+            return
+        }
 
         // maia3 playing as the bot is the best guess of what a bot of that rating does, else stockfish's top move
         var guess: String? = null
@@ -651,9 +697,13 @@ class ChessService : Service(), SideBarHost, SharedPreferences.OnSharedPreferenc
             }
         }
         val move = guess?.takeIf { Game.after(fen, it) != null } ?: top.move
-        val after = Game.after(fen, move) ?: return
-        val fr = squareRect(g, wb, move.substring(0, 2)) ?: return
-        val to = squareRect(g, wb, move.substring(2, 4)) ?: return
+        val after = Game.after(fen, move)
+        val fr = squareRect(g, wb, move.substring(0, 2))
+        val to = squareRect(g, wb, move.substring(2, 4))
+        if (after == null || fr == null || to == null) {
+            runJudge(g, wb, fen, key, c)
+            return
+        }
         val evalInfo = Advice(emptyList(), evalWhite, top.mate?.let { if (whiteToMove) it else -it }, null, emptyList())
         val san = Game.san(fen, move)
         val model = OverlayModel(
@@ -667,6 +717,7 @@ class ChessService : Service(), SideBarHost, SharedPreferences.OnSharedPreferenc
         predShownKey = key
         predModel = model
         showModel(model)
+        runJudge(g, wb, fen, key, c)
 
         // get our answer ready, unless the bot already moved while we were guessing
         val afterKey = Game.posKey(after)
@@ -680,6 +731,7 @@ class ChessService : Service(), SideBarHost, SharedPreferences.OnSharedPreferenc
         if (adv.listerError == null && a.cands.isNotEmpty()) {
             ready.clear()
             ready[afterKey] = a
+            showPremove(model, a, after, g, wb, c)
         }
         say("your answer is ready if the bot plays $san")
     }
@@ -708,6 +760,61 @@ class ChessService : Service(), SideBarHost, SharedPreferences.OnSharedPreferenc
         ready.clear()
         predShownKey = null
         predModel = null
+        lastFen = null
+        pendingJudge = null
+        badgeCache = null
+    }
+
+    /** puts your answer to the bot's guessed move next to the guess (a premove), if that is still the picture on the screen */
+    private fun showPremove(guess: OverlayModel, answer: Advice, after: String, g: BoardGeom, wb: Boolean, c: Cfg) {
+        if (!c.premove) return
+        if (lastModel !== guess) return // something else is on the screen by now
+        val best = answer.cands.firstOrNull() ?: return
+        val fr = squareRect(g, wb, best.move.substring(0, 2)) ?: return
+        val to = squareRect(g, wb, best.move.substring(2, 4)) ?: return
+        val withPre = guess.withPremove(fr, to, Game.san(after, best.move))
+        predModel = withPre
+        showModel(withPre, restart = false)
+    }
+
+    /** labels the move that was just played (on the square it went to). analysis only, it changes nothing about the moves we pick */
+    private fun runJudge(g: BoardGeom, wb: Boolean, fenAfter: String, key: String, c: Cfg) {
+        if (!c.showLabels) return
+        val cache = badgeCache
+        if (cache != null && cache.first == key) {
+            applyBadge(cache.second, g, wb)
+            return
+        }
+        val p = pendingJudge ?: return
+        pendingJudge = null
+        val r = review ?: return
+        val mv = try {
+            r.judge(p.first, p.second, fenAfter, 250, c.reviewRating)
+        } catch (e: Exception) {
+            null
+        } ?: return
+        badgeCache = Pair(key, mv)
+        applyBadge(mv, g, wb)
+    }
+
+    private fun applyBadge(mv: ReviewedMove, g: BoardGeom, wb: Boolean) {
+        val rect = squareRect(g, wb, mv.uci.substring(2, 4)) ?: return
+        val idx = screenIndexOf(rect.centerX(), rect.centerY(), g)
+        val glows = mv.label.glows && (cfg?.anim ?: true)
+        // the badge pops out of its square a little, and a glow (brilliant, great) and its floating squares reach all
+        // the squares around it for a few seconds. the board reader leaves those alone while that plays
+        val near = HashSet<Int>()
+        for (dr in -1..1) for (dc in -1..1) {
+            val rr = idx / 8 + dr
+            val cc = idx % 8 + dc
+            if (rr in 0..7 && cc in 0..7) near.add(rr * 8 + cc)
+        }
+        badgeNear = near.toIntArray()
+        badgeNearUntil = SystemClock.elapsedRealtime() + (if (glows) 3900L else 700L)
+        badgeIdx = idx
+        if (idx !in overlaySquares) overlaySquares += idx // a piece appearing or leaving there is still a real change
+        overlayShown = true
+        main.post { overlay?.setBadge(BadgeModel(rect, mv.label)) }
     }
 
     private fun boardRectOf(g: BoardGeom) = RectF(g.left.toFloat(), g.top.toFloat(), (g.left + g.size).toFloat(), (g.top + g.size).toFloat())
@@ -724,10 +831,13 @@ class ChessService : Service(), SideBarHost, SharedPreferences.OnSharedPreferenc
         overlayShown = false
         overlaySquares = IntArray(0)
         overlayCrossed = IntArray(0)
+        badgeNear = IntArray(0)
+        badgeNearUntil = 0L
+        badgeIdx = -1
         main.post { overlay?.clearMove() }
     }
 
-    private fun showModel(m: OverlayModel) {
+    private fun showModel(m: OverlayModel, restart: Boolean = true) {
         overlayShown = true
         lastModel = m
         val g = BoardGeom(m.board.left.toInt(), m.board.top.toInt(), m.board.width().toInt())
@@ -735,6 +845,7 @@ class ChessService : Service(), SideBarHost, SharedPreferences.OnSharedPreferenc
         val crossed = HashSet<Int>()
         val pairs = ArrayList<Pair<RectF, RectF>>()
         for (mv in m.moves) pairs.add(Pair(mv.from, mv.to))
+        if (m.preFrom != null && m.preTo != null) pairs.add(Pair(m.preFrom, m.preTo))
         for (s in m.line) pairs.add(Pair(s.from, s.to))
         if (m.threatFrom != null && m.threatTo != null) pairs.add(Pair(m.threatFrom, m.threatTo))
         if (m.predFrom != null && m.predTo != null) pairs.add(Pair(m.predFrom, m.predTo))
@@ -746,9 +857,17 @@ class ChessService : Service(), SideBarHost, SharedPreferences.OnSharedPreferenc
                 crossed.add(screenIndexOf(a.centerX() + (b.centerX() - a.centerX()) * t, a.centerY() + (b.centerY() - a.centerY()) * t, g))
             }
         }
+        if (badgeIdx >= 0) ends.add(badgeIdx)
         crossed.removeAll(ends)
         overlaySquares = ends.toIntArray()
         overlayCrossed = crossed.toIntArray()
+        if (!restart) {
+            // the same picture plus a small addition: no new entrance animation, just a short wait for it to settle
+            main.post { overlay?.updateModel(m) }
+            Thread.sleep(350)
+            look()?.let { prevThumb = thumbOf(it) }
+            return
+        }
         main.post { overlay?.setModel(m) }
         // wait until our drawing (and its animation) is on screen, so it isn't mistaken for a change on the board
         val c = cfg

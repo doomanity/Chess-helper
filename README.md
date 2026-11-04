@@ -22,6 +22,8 @@ github builds it for you. open the Actions tab and wait for the build (about 5 t
 
 - **guess the bot's move**: while the bot thinks, a faint dashed arrow with a "?" shows its likely move (maia3 at the bot's rating if you use maia3, else stockfish). your answer to that move is worked out early, so if the guess is right your moves show up at once ("ready early" on the card)
 - **live accuracy**: "you 87% · bot 72%" on the card, lichess style. each move is scored by how much it dropped the mover's winning chances. moves the app missed (two moves at once) are skipped
+- **move labels**: every move that was just played (yours and the bot's) gets a small badge on the square it went to: brilliant, great, best, excellent, good, book, inaccuracy, mistake, miss or blunder. brilliant and great glow blue with a shimmer. it is analysis only and never changes which moves are suggested. each label costs about half a second of stockfish. the "move labels" switch turns it off, and the rating used to judge comes from the review screen
+- **premove**: while the bot thinks, your answer to the move the helper guesses (maia3's top pick when maia3 is on) is drawn next to the guess as a dashed arrow with a "P". if the bot plays the guess, your real suggestion shows at once. if it plays something else, the premove just goes away. the "premove" switch turns it off
 - **pause**: hides everything and stops reading the screen until you resume
 
 ## game review

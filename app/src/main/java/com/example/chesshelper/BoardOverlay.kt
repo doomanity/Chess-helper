@@ -4,9 +4,12 @@ import android.content.Context
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.DashPathEffect
+import android.graphics.LinearGradient
 import android.graphics.Paint
 import android.graphics.Path
+import android.graphics.RadialGradient
 import android.graphics.RectF
+import android.graphics.Shader
 import android.os.SystemClock
 import android.view.View
 import kotlin.math.PI
@@ -38,8 +41,20 @@ class OverlayModel(
     val accuracy: String? = null,     // like "you 87% · bot 72%"
     val predFrom: RectF? = null,      // the bot's likely next move (shown while it thinks)
     val predTo: RectF? = null,
-    val predLabel: String = ""        // like "Nf6"
-)
+    val predLabel: String = "",       // like "Nf6"
+    val preFrom: RectF? = null,       // your answer to the bot's guessed move, ready before the bot moves (a premove)
+    val preTo: RectF? = null,
+    val preLabel: String = ""         // like "Nf3"
+) {
+    /** the same picture plus your premove */
+    fun withPremove(from: RectF, to: RectF, label: String) = OverlayModel(
+        moves, board, whiteBottom, evalShare, evalText, threatFrom, threatTo, line, title, accuracy,
+        predFrom, predTo, predLabel, from, to, label
+    )
+}
+
+/** the label of the move that was just played (brilliant, blunder...), drawn on the square it went to */
+class BadgeModel(val rect: RectF, val label: Label)
 
 /** how to draw: style, colors, animation, sizes */
 class OverlayLook(
@@ -62,6 +77,8 @@ class BoardOverlay(ctx: Context) : View(ctx) {
     }
 
     private var model: OverlayModel? = null
+    private var badge: BadgeModel? = null
+    private var badgeStart = 0L
     private var look = OverlayLook("neon", Color.rgb(0, 229, 255), true, 1f, 1f, 1f, 0.95f)
     private var start = 0L
     private var lastShare = 0.5f
@@ -102,10 +119,24 @@ class BoardOverlay(ctx: Context) : View(ctx) {
         invalidate()
     }
 
+    /** swaps what is drawn without playing the entrance animation again (a premove showing up next to the guess) */
+    fun updateModel(m: OverlayModel) {
+        model = m
+        invalidate()
+    }
+
+    /** the label of the move that was just played. it stays until the board changes (clearMove) */
+    fun setBadge(b: BadgeModel?) {
+        badge = b
+        badgeStart = SystemClock.uptimeMillis()
+        invalidate()
+    }
+
     fun clearMove() {
-        if (model == null) return
+        if (model == null && badge == null) return
         model?.evalShare?.let { lastShare = it }
         model = null
+        badge = null
         invalidate()
     }
 
@@ -153,10 +184,12 @@ class BoardOverlay(ctx: Context) : View(ctx) {
             for (s in m.line) drawLineStep(canvas, s)
             if (m.threatFrom != null && m.threatTo != null) drawThreat(canvas, m.threatFrom, m.threatTo)
             if (m.predFrom != null && m.predTo != null) drawPrediction(canvas, m.predFrom, m.predTo)
+            if (m.preFrom != null && m.preTo != null) drawPremove(canvas, m.preFrom, m.preTo)
             // the worst first, so the best move is drawn on top
             for (mv in m.moves.sortedByDescending { it.rank }) drawMove(canvas, mv)
             if (m.moves.isNotEmpty() || m.predLabel.isNotEmpty()) drawCard(canvas, m, screenW)
         }
+        badge?.let { drawLabelBadge(canvas, it) }
         if (debug.isNotEmpty()) canvas.drawText(debug, screenW / 2f, (height + where[1]) - 36f * d, debugPaint)
     }
 
@@ -346,6 +379,106 @@ class BoardOverlay(ctx: Context) : View(ctx) {
         }
     }
 
+    /** your answer to the bot's guessed move, drawn ahead of time like a premove: a ghost arrow in the accent color */
+    private fun drawPremove(c: Canvas, from: RectF, to: RectF) {
+        val sq = to.width()
+        val col = look.accent
+        fill.color = Theme.withAlpha(col, (40 * drawP).toInt())
+        c.drawRoundRect(to, sq * 0.12f, sq * 0.12f, fill)
+        arrow(c, from, to, col, sq * 0.085f * look.arrowSize, 0.6f, true)
+        val r = sq * 0.13f * drawP
+        if (r > 1f) {
+            val bx = to.left + sq * 0.18f
+            val by = to.top + sq * 0.18f
+            badge(c, bx, by, r, col)
+            text.textSize = r * 1.3f
+            text.textAlign = Paint.Align.CENTER
+            text.isFakeBoldText = true
+            text.color = Color.rgb(10, 14, 24)
+            c.drawText("P", bx, by + r * 0.46f, text)
+            text.color = Color.WHITE
+            text.isFakeBoldText = false
+        }
+    }
+
+    private val shine = Paint(Paint.ANTI_ALIAS_FLAG)
+
+    /**
+     * the label of the move that was just played, in the corner of the square it went to.
+     * a brilliant move glows bright blue and a great move deep blue: a shimmer sweeps over the piece and little
+     * squares float up. everything stays inside the 3x3 squares around it (the board reader knows about those)
+     */
+    private fun drawLabelBadge(c: Canvas, b: BadgeModel) {
+        val sq = b.rect.width()
+        val lab = b.label
+        val t = (SystemClock.uptimeMillis() - badgeStart) / 1000f
+        var moving = false
+        if (lab.glows && look.anim) moving = enchantSquare(c, b.rect, lab, t)
+
+        val pop = ease(t / 0.22f)
+        val r = sq * 0.2f * (0.4f + 0.6f * pop)
+        val cx = b.rect.left + r * 0.9f
+        val cy = b.rect.top + r * 0.9f
+        fill.color = Color.argb(90, 0, 0, 0)
+        c.drawCircle(cx + 1.5f * d, cy + 1.5f * d, r * 1.1f, fill)
+        fill.color = Color.WHITE
+        c.drawCircle(cx, cy, r * 1.1f, fill)
+        fill.color = lab.color
+        c.drawCircle(cx, cy, r, fill)
+        text.textAlign = Paint.Align.CENTER
+        text.isFakeBoldText = true
+        text.textSize = r * (if (lab.symbol.length > 1) 1.05f else 1.3f)
+        text.color = if (lab == Label.INACCURACY) Color.rgb(60, 50, 0) else Color.WHITE
+        c.drawText(lab.symbol, cx, cy + r * 0.42f, text)
+        text.isFakeBoldText = false
+        text.color = Color.WHITE
+        if (moving || pop < 1f) postInvalidateOnAnimation()
+    }
+
+    /** true while the glow is still moving */
+    private fun enchantSquare(c: Canvas, rect: RectF, lab: Label, t: Float): Boolean {
+        val sq = rect.width()
+        val bright = if (lab == Label.BRILLIANT) Color.rgb(0, 229, 255) else Color.rgb(68, 98, 255)
+        val deep = if (lab == Label.BRILLIANT) Color.rgb(30, 110, 255) else Color.rgb(24, 32, 150)
+        val fade = if (t < 2.6f) 1f else maxOf(0.35f, 1f - (t - 2.6f) / 0.8f)
+        val pulse = if (t < 3.4f) 0.6f + 0.4f * sin(t * 5.5f) else 0.6f
+        val cx = rect.centerX()
+        val cy = rect.centerY()
+
+        // a soft glow that reaches a little into the squares around
+        shine.shader = RadialGradient(cx, cy, sq * 0.9f, intArrayOf(Theme.withAlpha(bright, (150 * pulse * fade).toInt()), Theme.withAlpha(bright, 0)), null, Shader.TileMode.CLAMP)
+        c.drawCircle(cx, cy, sq * 0.9f, shine)
+
+        // a bright band sweeping over the piece, corner to corner, with a blue tint under it
+        c.save()
+        c.clipRect(rect)
+        shine.shader = null
+        shine.color = Theme.withAlpha(deep, (70 * pulse * fade).toInt())
+        c.drawRect(rect, shine)
+        val sweep = (t * 0.85f) % 1.4f
+        val x0 = rect.left - sq * 0.5f + sweep * sq * 1.7f
+        shine.shader = LinearGradient(
+            x0, rect.top, x0 + sq * 0.5f, rect.top + sq * 0.5f,
+            intArrayOf(Theme.withAlpha(bright, 0), Theme.withAlpha(Color.WHITE, (190 * fade).toInt()), Theme.withAlpha(bright, 0)),
+            floatArrayOf(0f, 0.5f, 1f), Shader.TileMode.CLAMP
+        )
+        c.drawRect(rect, shine)
+        shine.shader = null
+        c.restore()
+
+        // little squares floating up (kept inside the square above)
+        for (k in 0 until 7) {
+            val ph = (t * 0.55f + k * 0.14f) % 1f
+            val px = cx + sin(k * 2.4f + t * 1.7f) * sq * 0.42f
+            val py = rect.bottom - ph * sq * 1.8f
+            val a = (1f - ph) * fade
+            val s = sq * 0.06f * (1f - ph * 0.5f)
+            fill.color = Theme.withAlpha(if (k % 2 == 0) bright else Color.WHITE, (230 * a).toInt())
+            c.drawRect(px - s, py - s, px + s, py + s, fill)
+        }
+        return t < 3.4f
+    }
+
     private fun badge(c: Canvas, cx: Float, cy: Float, r: Float, col: Int) {
         if (neon) {
             fill.color = Theme.withAlpha(col, (60 * glow).toInt())
@@ -454,7 +587,8 @@ class BoardOverlay(ctx: Context) : View(ctx) {
         val board = m.board
         val w = minOf(board.width(), screenW - 24f * d).coerceAtLeast(220f * d)
         val predRow = m.moves.isEmpty() && m.predLabel.isNotEmpty()
-        val rows = if (predRow) 1 else m.moves.size
+        val preRow = predRow && m.preLabel.isNotEmpty()
+        val rows = if (predRow) (if (preRow) 2 else 1) else m.moves.size
         val h = rows * rowH + pad * 2 + head
         val left = (board.left + (board.width() - w) / 2f).coerceIn(8f * d, maxOf(8f * d, screenW - w - 8f * d))
         val evalAbove = m.evalShare != null && board.left < 9f * d * k + 8f * d
@@ -506,6 +640,23 @@ class BoardOverlay(ctx: Context) : View(ctx) {
             text.textSize = rowH * 0.46f
             text.textAlign = Paint.Align.LEFT
             c.drawText("bot will likely play ${m.predLabel}", rect.left + pad + rowH * 0.95f, cy + rowH * 0.17f, text)
+        }
+        if (preRow) {
+            // your answer to that guess, ready before the bot moves
+            val cy = y0 + rowH * 1.5f
+            val dotX = rect.left + pad + rowH * 0.36f
+            fill.color = look.accent
+            c.drawCircle(dotX, cy, rowH * 0.3f, fill)
+            text.textSize = rowH * 0.4f
+            text.textAlign = Paint.Align.CENTER
+            text.isFakeBoldText = true
+            text.color = Color.rgb(10, 14, 24)
+            c.drawText("P", dotX, cy + rowH * 0.14f, text)
+            text.isFakeBoldText = false
+            text.color = Color.WHITE
+            text.textSize = rowH * 0.5f
+            text.textAlign = Paint.Align.LEFT
+            c.drawText("premove ${m.preLabel}", rect.left + pad + rowH * 0.95f, cy + rowH * 0.18f, text)
         }
         for ((i, mv) in m.moves.sortedBy { it.rank }.withIndex()) {
             val cy = y0 + rowH * i + rowH / 2f

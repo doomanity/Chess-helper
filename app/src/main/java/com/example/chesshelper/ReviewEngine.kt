@@ -155,57 +155,86 @@ class Analyzer(private val engine: UciEngine, private val book: OpeningBook?) {
 
         fun snapshot() = ReviewResult(rep.fens, ArrayList(moves), ArrayList(evals), rep.note)
 
-        var pe0 = eval(rep.fens[0], ms)
-        evals.add(whiteScore(pe0, rep.fens[0]))
+        evals.add(whiteEval(rep.fens[0], ms))
         progress(snapshot())
 
         for (i in 0 until n) {
             if (cancel()) return snapshot()
             val fen = rep.fens[i]
             val next = rep.fens[i + 1]
-            val played = rep.ucis[i]
-            val moverWhite = fen.split(" ").getOrNull(1) != "b"
-            val pe1 = eval(next, ms)
-
-            val bestLine = pe0.lines.firstOrNull()
-            val bestUci = bestLine?.move ?: played
-            // scores for the player who moved. the move that was played is judged by the same search as the best
-            // move when it was one of the two best, otherwise by the search of the position after it
-            val afterOwn = -pe1.score
-            val bestScore = bestLine?.score ?: afterOwn
-            val second = pe0.lines.getOrNull(1)?.score
-            val afterScore = if (played == bestUci) bestScore
-                else pe0.lines.firstOrNull { it.move == played }?.score ?: afterOwn
-
             val bookName = if (inBook && book != null) book.name(next) else null
             if (bookName == null) inBook = false
-
-            val sac = if (bookName == null) sacrificeOf(fen, played, pe1.lines.firstOrNull()?.pv ?: emptyList(), moverWhite) else Pair(false, 0)
             val recapture = i > 0 && rep.captures[i - 1] && rep.tos[i] == rep.tos[i - 1]
-            val input = PlyInput(
-                playedUci = played, bestUci = bestUci, bestScore = bestScore, secondScore = second, afterScore = afterScore,
-                isBook = bookName != null, isRecapture = recapture, sacrifice = sac.first, materialLead = sac.second,
-                prevOppLabel = prevLabel
-            )
-            val label = Labeler.label(input, rating)
-            prevLabel = label
-
-            val beforeWhite = if (moverWhite) bestScore else -bestScore
-            val afterWhite = if (moverWhite) afterScore else -afterScore
-            moves.add(
-                ReviewedMove(
-                    ply = i + 1, uci = played, san = Game.san(fen, played), moverWhite = moverWhite, label = label,
-                    bestUci = bestUci, bestSan = Game.san(fen, bestUci),
-                    bestScoreWhite = beforeWhite, afterScoreWhite = afterWhite,
-                    accuracy = Accuracy.moveAccuracy(moverWhite, beforeWhite, afterWhite), opening = bookName
-                )
-            )
-            evals.add(whiteScore(pe1, next))
-            pe0 = pe1
+            val mv = judge(fen, rep.ucis[i], next, ms, rating, bookName, recapture, prevLabel, i + 1)
+            prevLabel = mv.label
+            moves.add(mv)
+            evals.add(whiteEval(next, ms))
             progress(snapshot())
         }
         return snapshot()
     }
+
+    /**
+     * judges one move: fen = the position before it, next = the position after it. bookName = the opening name if
+     * the move is still book, recapture = it takes back on the square the opponent just took on, prevLabel = how the
+     * opponent's last move was labeled. used by the full review and by the live labels on the board
+     */
+    fun judge(
+        fen: String, played: String, next: String, ms: Int, rating: Int,
+        bookName: String?, recapture: Boolean, prevLabel: Label?, ply: Int = 0
+    ): ReviewedMove {
+        val pe0 = eval(fen, ms)
+        val pe1 = eval(next, ms)
+        val moverWhite = fen.split(" ").getOrNull(1) != "b"
+
+        val bestLine = pe0.lines.firstOrNull()
+        val bestUci = bestLine?.move ?: played
+        // scores for the player who moved. the move that was played is judged by the same search as the best
+        // move when it was one of the two best, otherwise by the search of the position after it
+        val afterOwn = -pe1.score
+        val bestScore = bestLine?.score ?: afterOwn
+        val second = pe0.lines.getOrNull(1)?.score
+        val afterScore = if (played == bestUci) bestScore
+            else pe0.lines.firstOrNull { it.move == played }?.score ?: afterOwn
+
+        val sac = if (bookName == null) sacrificeOf(fen, played, pe1.lines.firstOrNull()?.pv ?: emptyList(), moverWhite) else Pair(false, 0)
+        val input = PlyInput(
+            playedUci = played, bestUci = bestUci, bestScore = bestScore, secondScore = second, afterScore = afterScore,
+            isBook = bookName != null, isRecapture = recapture, sacrifice = sac.first, materialLead = sac.second,
+            prevOppLabel = prevLabel
+        )
+        val label = Labeler.label(input, rating)
+        val beforeWhite = if (moverWhite) bestScore else -bestScore
+        val afterWhite = if (moverWhite) afterScore else -afterScore
+        return ReviewedMove(
+            ply = ply, uci = played, san = Game.san(fen, played), moverWhite = moverWhite, label = label,
+            bestUci = bestUci, bestSan = Game.san(fen, bestUci),
+            bestScoreWhite = beforeWhite, afterScoreWhite = afterWhite,
+            accuracy = Accuracy.moveAccuracy(moverWhite, beforeWhite, afterWhite), opening = bookName
+        )
+    }
+
+    /** the engine's best line for this position (side to move's view), remembered. null if the game is over here */
+    fun topLine(fen: String, ms: Int): Line? = eval(fen, ms).lines.firstOrNull()
+
+    /** the score of a position from white's side */
+    fun whiteEval(fen: String, ms: Int): Int = whiteScore(eval(fen, ms), fen)
+
+    /** did this move take a piece, and which square (like "e4") does it go to. null if it isn't a legal move there */
+    fun moveFacts(fen: String, uci: String): Pair<Boolean, String>? {
+        return try {
+            val b = Board()
+            b.loadFromFen(fen)
+            val mv = moveOf(b, uci) ?: return null
+            Pair(isCapture(b, mv), mv.to.name.lowercase())
+        } catch (e: Exception) {
+            null
+        }
+    }
+
+    private fun isCapture(b: Board, mv: Move): Boolean =
+        b.getPiece(mv.to) != Piece.NONE ||
+            (b.getPiece(mv.from).pieceType == PieceType.PAWN && mv.from.name[0] != mv.to.name[0])
 
     // ------------------------------------------------------------------ chess helpers
 
@@ -229,9 +258,7 @@ class Analyzer(private val engine: UciEngine, private val book: OpeningBook?) {
                 note = "stopped at move ${i / 2 + 1}: $uci is not a legal move"
                 break
             }
-            val mover = b.getPiece(mv.from)
-            val capture = b.getPiece(mv.to) != Piece.NONE ||
-                (mover.pieceType == PieceType.PAWN && mv.from.name[0] != mv.to.name[0])
+            val capture = isCapture(b, mv)
             b.doMove(mv)
             fens.add(b.fen)
             ucis.add(uci)

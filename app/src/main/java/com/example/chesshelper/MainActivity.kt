@@ -129,6 +129,11 @@ class MainActivity : Activity() {
         chips2.addView(chip("guess the bot's move", c.predict) { on -> save { it.putBoolean("predict", on) } }, weight())
         chips2.addView(chip("live accuracy", c.showAcc) { on -> save { it.putBoolean("show_acc", on) } }, weight())
         card.addView(chips2, full(top = 6f))
+        val chips3 = LinearLayout(this)
+        chips3.orientation = LinearLayout.HORIZONTAL
+        chips3.addView(chip("move labels", c.showLabels) { on -> save { it.putBoolean("show_labels", on) } }, weight())
+        chips3.addView(chip("premove", c.premove) { on -> save { it.putBoolean("premove", on) } }, weight())
+        card.addView(chips3, full(top = 6f))
         label(card, "arrow style")
         card.addView(seg(listOf("neon" to "neon", "solid" to "solid", "minimal" to "minimal"), c.style) { v -> save { it.putString("arrow_style", v) } })
         label(card, "theme")
