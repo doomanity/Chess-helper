@@ -293,31 +293,98 @@ class Analyzer(private val engine: UciEngine, private val book: OpeningBook?) {
     }
 
     /**
-     * did this move give up material for nothing in return (for now)? plays the move and the engine's best answers
-     * (up to 6 half-moves) and looks at what the mover has left after the last answer. returns that and the
-     * mover's material lead before the move
+     * is this move a sacrifice? two ways, like chess.com:
+     * - the engine's line after it really wins material from the mover (looked at once the trades are over,
+     *   never in the middle of an exchange), or
+     * - it leaves a piece hanging: the opponent could take it and come out ahead, even if taking would be a
+     *   mistake (that is usually why the move is brilliant). if every other move hangs a piece too, it isn't a
+     *   choice, so it doesn't count.
+     * returns that and the mover's material lead before the move
      */
     private fun sacrificeOf(fen: String, played: String, pv: List<String>, moverWhite: Boolean): Pair<Boolean, Int> {
         return try {
             val b = Board()
             b.loadFromFen(fen)
             val before = material(b, moverWhite) - material(b, !moverWhite)
-            var after = before
-            var answered = false
-            val line = ArrayList<String>()
-            line.add(played)
-            line.addAll(pv.take(5))
-            for ((k, uci) in line.withIndex()) {
-                val mv = moveOf(b, uci) ?: break
-                b.doMove(mv)
-                if (k % 2 == 1) { // the opponent has answered
-                    after = material(b, moverWhite) - material(b, !moverWhite)
-                    answered = true
-                }
-            }
-            Pair(answered && before - after >= Labeler.SACRIFICE_MIN, before)
+            val lineSac = lineGivesUp(b, played, pv, moverWhite, before)
+            val hangSac = !lineSac && hangsPiece(fen, played, moverWhite)
+            Pair(lineSac || hangSac, before)
         } catch (e: Exception) {
             Pair(false, 0)
         }
+    }
+
+    /** plays the move and the engine's line, and checks the material at the first calm moment after the opponent answered */
+    private fun lineGivesUp(start: Board, played: String, pv: List<String>, moverWhite: Boolean, before: Int): Boolean {
+        val b = Board()
+        b.loadFromFen(start.fen)
+        val line = ArrayList<String>()
+        line.add(played)
+        line.addAll(pv.take(11))
+        val moves = ArrayList<Move>()
+        val caps = ArrayList<Boolean>()
+        for (uci in line) {
+            val mv = moveOf(b, uci) ?: break
+            caps.add(isCapture(b, mv))
+            moves.add(mv)
+            b.doMove(mv)
+        }
+        // replay and stop at the first point (after the opponent's first answer) where the last move took nothing
+        // and the next one takes nothing either: the trades are over there
+        val r = Board()
+        r.loadFromFen(start.fen)
+        for (k in moves.indices) {
+            r.doMove(moves[k])
+            if (k < 1) continue
+            val calm = !caps[k] && (k + 1 >= moves.size || !caps[k + 1])
+            if (calm || k == moves.size - 1) {
+                if (!calm) return false // never calmed down within the line: don't guess
+                val now = material(r, moverWhite) - material(r, !moverWhite)
+                return before - now >= Labeler.SACRIFICE_MIN
+            }
+        }
+        return false
+    }
+
+    /** how much the opponent could win right now by taking one of the mover's pieces (knight or bigger) */
+    private fun bestGrab(b: Board): Int {
+        var best = 0
+        val opp = try { b.legalMoves().toList() } catch (e: Exception) { return 0 }
+        for (c in opp) {
+            val victim = b.getPiece(c.to)
+            if (victim == Piece.NONE) continue
+            val t = victim.pieceType
+            if (t == PieceType.PAWN || t == PieceType.KING) continue
+            val attacker = value(b.getPiece(c.from).pieceType)
+            b.doMove(c)
+            val canTakeBack = try { b.legalMoves().any { it.to == c.to } } catch (e: Exception) { false }
+            b.undoMove()
+            val gain = value(t) - (if (canTakeBack) attacker else 0)
+            if (gain > best) best = gain
+        }
+        return best
+    }
+
+    /** the move leaves a piece hanging (and that was a choice: some other move would not have) */
+    private fun hangsPiece(fen: String, played: String, moverWhite: Boolean): Boolean {
+        val b = Board()
+        b.loadFromFen(fen)
+        val mv = moveOf(b, played) ?: return false
+        val took = if (b.getPiece(mv.to) != Piece.NONE) value(b.getPiece(mv.to).pieceType) else 0
+        b.doMove(mv)
+        val risk = bestGrab(b) - took
+        b.undoMove()
+        if (risk < Labeler.SACRIFICE_MIN) return false
+        // was there a move that keeps everything safe? if not, the piece was lost anyway
+        val all = try { b.legalMoves().toList() } catch (e: Exception) { return false }
+        for (alt in all) {
+            if (alt.toString() == played) continue
+            val altTook = if (b.getPiece(alt.to) != Piece.NONE) value(b.getPiece(alt.to).pieceType) else 0
+            b.doMove(alt)
+            val altRisk = bestGrab(b) - altTook
+            b.undoMove()
+            if (altRisk < Labeler.SACRIFICE_MIN) return true
+        }
+        return false
     }
 }

@@ -10,6 +10,8 @@ two engines: stockfish (on the phone, adjustable difficulty) or maia3 (plays lik
 
 github builds it for you. open the Actions tab and wait for the build (about 5 to 10 minutes), then download the apk from Releases ("latest build") and install it (allow "install unknown apps" for your browser).
 
+**updating**: android only installs a new apk over the old one when both are signed with the same key. github makes a new random key for every build unless the repo has two secrets (Settings > Secrets and variables > Actions): `SIGNING_KEY_B64` (the keystore file, base64) and `SIGNING_PASSWORD`. with those set, every build installs right over the old app and keeps your settings, and the build number goes up by itself. the first build with the key still needs one last uninstall of the old app. never commit the keystore, the repo is public.
+
 ## use it
 
 1. open the app, paste your claude api key, pick your side and difficulty
@@ -38,8 +40,8 @@ open it from the app ("open game review") or from the side bar ("review this gam
 labels: brilliant `!!`, great `!`, best, excellent, good, book, inaccuracy `?!`, mistake `?`, miss, blunder `??`. every position is looked at by the phone's stockfish at full power, then:
 
 - best / excellent / good / inaccuracy / mistake / blunder = how many "expected points" the move gave away compared to the best move, with chess.com's published cut-offs (0.02, 0.05, 0.10, 0.20)
-- **brilliant** = a good piece sacrifice: it gives up material that doesn't come back, you stay at least equal, it is (nearly) the best move, and you were not already winning by a lot
-- **great** = the only move that wins (equal to winning) or saves (losing to equal), and not a plain recapture
+- **brilliant** = a good piece sacrifice: it leaves a piece hanging (the opponent could take it, even if taking loses) or gives up material that doesn't come back once the trades are over. you stay at least equal, it is (nearly) the best move, and the quiet moves would not have won big anyway. a sacrifice that leads to mate counts
+- **great** = the only good move: every other move gives away a real chunk and drops you a step (winning to only better, equal to worse, losing to lost). never a plain recapture
 - **book** = still inside known opening theory (about 8000 positions, from lichess's open chess-openings data). the opening name shows under the move
 - **miss** = a small slip right after the opponent messed up, when there was something to take
 - the rating picker (600 to 2500) bends the curve like chess.com does: lower ratings are judged more kindly. brilliant, great and miss have no published formula, so they are close copies of how chess.com describes them, not exact
@@ -48,9 +50,13 @@ a brilliant or great move glows on the board (bright blue and deep blue, with a 
 
 the opening book is `app/src/main/assets/openings.tsv`. rebuild it with `tools/build_openings.py` (see the top of that file).
 
+## look
+
+the app screens follow the ios look (grouped lists, switches, segmented controls, sliders) and switch with your phone's light / dark mode. the quick menu looks like control center. the version is shown at the bottom of the main screen.
+
 ## side bar (quick menu while playing)
 
-touch the right (or left) edge of the screen: a thin glowing bar shows up. slide it towards the middle and the quick menu opens: your side, engine, strength, moves shown, eval bar / threat / best line, arrow style, effects, theme, rethink, max power (stockfish at full power for one move, a few saves per game) and new game. drag the bar up or down to move it. it hides itself when you don't touch it.
+touch the right (or left) edge of the screen: a small white bar shows up (or use the round button, like assistive touch). slide it towards the middle and the quick menu opens: your side, engine, strength, moves shown, eval bar / threat / best line, arrow style, effects, theme, rethink, max power (stockfish at full power for one move, a few saves per game) and new game. drag the bar up or down to move it. it hides itself when you don't touch it.
 
 ## maia3 (optional, runs on your pc)
 

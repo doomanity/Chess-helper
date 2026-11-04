@@ -47,7 +47,9 @@ object ReviewTest {
         check(l(ply(bestScore = 0, second = -400)) == Label.GREAT, "only move: losing becomes equal")
         check(l(ply(bestScore = 300, second = 250)) == Label.BEST, "two good moves: just best")
         check(l(ply(bestScore = 300, second = 0, recapture = true)) == Label.BEST, "a recapture is never great")
-        check(l(ply(bestScore = 30, second = -150)) == Label.BEST, "only move that keeps it equal is not great (nothing changes)")
+        check(l(ply(bestScore = 30, second = -60)) == Label.BEST, "a small gap is not great")
+        check(l(ply(bestScore = 30, second = -250)) == Label.GREAT, "the only move that keeps it equal is great")
+        check(l(ply(bestScore = 700, second = 250)) == Label.GREAT, "the only move that keeps a big win is great")
         check(l(ply(bestScore = 30, second = null)) == Label.BEST, "a single legal move is not great")
         check(l(ply(played = "d2d4", bestScore = 300, second = 0, after = 0)) != Label.GREAT, "playing the second move is not great")
 
@@ -61,7 +63,9 @@ object ReviewTest {
         // --- mates
         check(l(ply(played = "d2d4", bestScore = 29990, after = 300)) == Label.BLUNDER, "missing a mate in 1 costs a lot")
         check(l(ply(bestScore = 29990, second = 0)) == Label.GREAT, "finding the only mate is great")
-        check(l(ply(bestScore = 29990, second = 300)) == Label.BEST, "a mate when other moves also win is just best")
+        check(l(ply(bestScore = 29990, second = 900)) == Label.BEST, "a mate when other moves also win big is just best")
+        check(l(ply(sac = true, bestScore = 29990, second = 350, after = null)) == Label.BRILLIANT, "a sacrifice that leads to mate is brilliant")
+        check(l(ply(sac = true, bestScore = 29990, second = 29950, after = null)) != Label.BRILLIANT, "no brilliant when a quiet move mates too")
         check(l(ply(played = "d2d4", bestScore = 100, after = -29990)) == Label.BLUNDER, "walking into a mate is a blunder")
 
         // --- the curve is kinder to lower rated players

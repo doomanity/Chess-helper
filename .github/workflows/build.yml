@@ -34,7 +34,20 @@ jobs:
         with:
           gradle-version: "8.7"
 
+      - name: signing key (from the repo secrets, so every build can update the app in place)
+        env:
+          KEY_B64: ${{ secrets.SIGNING_KEY_B64 }}
+        run: |
+          if [ -n "$KEY_B64" ]; then
+            echo "$KEY_B64" | base64 -d > "$RUNNER_TEMP/release.jks"
+            echo "SIGNING_STORE=$RUNNER_TEMP/release.jks" >> "$GITHUB_ENV"
+          else
+            echo "no SIGNING_KEY_B64 secret: this build gets a random key and won't install over the old app"
+          fi
+
       - name: build apk
+        env:
+          SIGNING_PASSWORD: ${{ secrets.SIGNING_PASSWORD }}
         run: gradle assembleDebug --no-daemon --stacktrace
 
       - uses: actions/upload-artifact@v4

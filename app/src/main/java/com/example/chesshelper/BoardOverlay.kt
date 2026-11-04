@@ -10,6 +10,7 @@ import android.graphics.Path
 import android.graphics.RadialGradient
 import android.graphics.RectF
 import android.graphics.Shader
+import android.graphics.Typeface
 import android.os.SystemClock
 import android.view.View
 import kotlin.math.PI
@@ -96,6 +97,9 @@ class BoardOverlay(ctx: Context) : View(ctx) {
         textAlign = Paint.Align.CENTER
         setShadowLayer(4f, 0f, 0f, Color.BLACK)
     }
+
+    private val regular: Typeface = Typeface.create("sans-serif", Typeface.NORMAL)
+    private val medium: Typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
 
     private fun gradeColor(m: DrawMove): Int = if (m.star) Theme.GOLD else gradeColor(m.grade)
 
@@ -596,32 +600,34 @@ class BoardOverlay(ctx: Context) : View(ctx) {
         if (top < 56f * d) top = board.bottom + 14f * d
         val slide = (1f - drawP) * 16f * d
         val rect = RectF(left, top + slide, left + w, top + h + slide)
-        val radius = 18f * d * k
+        val radius = 20f * d * k
 
+        // an ios style dark card: soft shadow, near black glass, a hairline edge (and a faint glow for neon)
         if (neon) {
-            stroke.color = Theme.withAlpha(look.accent, (50 * glow).toInt())
-            stroke.strokeWidth = 8f * d
+            stroke.color = Theme.withAlpha(look.accent, (34 * glow).toInt())
+            stroke.strokeWidth = 6f * d
             c.drawRoundRect(rect, radius, radius, stroke)
         }
-        card.color = Theme.panel(look.accent, (232 * drawP).toInt())
+        card.color = Color.argb((236 * drawP).toInt(), 28, 28, 30)
+        card.setShadowLayer(14f * d, 0f, 4f * d, Color.argb((90 * drawP).toInt(), 0, 0, 0))
         c.drawRoundRect(rect, radius, radius, card)
-        stroke.color = Theme.withAlpha(look.accent, (200 * drawP).toInt())
-        stroke.strokeWidth = 1.5f * d
+        card.clearShadowLayer()
+        stroke.color = Color.argb((40 * drawP).toInt(), 255, 255, 255)
+        stroke.strokeWidth = 0.8f * d
         c.drawRoundRect(rect, radius, radius, stroke)
 
         var y0 = rect.top + pad
         if (head > 0f) {
-            text.textSize = 11f * d * k
+            text.textSize = 12.5f * d * k
             text.textAlign = Paint.Align.LEFT
-            text.color = Theme.withAlpha(look.accent, 230)
-            text.letterSpacing = 0.12f
-            c.drawText(m.title.uppercase(), rect.left + pad + 4f * d, y0 + head * 0.62f, text)
-            text.letterSpacing = 0f
+            text.typeface = medium
+            text.color = Color.argb(153, 235, 235, 245)
+            c.drawText(m.title, rect.left + pad + 4f * d, y0 + head * 0.62f, text)
             m.accuracy?.let {
                 text.textAlign = Paint.Align.RIGHT
-                text.color = Color.argb(225, 225, 232, 245)
-                c.drawText("acc  $it", rect.right - pad - 4f * d, y0 + head * 0.62f, text)
+                c.drawText(it, rect.right - pad - 4f * d, y0 + head * 0.62f, text)
             }
+            text.typeface = regular
             text.color = Color.WHITE
             y0 += head
         }
@@ -660,6 +666,13 @@ class BoardOverlay(ctx: Context) : View(ctx) {
         }
         for ((i, mv) in m.moves.sortedBy { it.rank }.withIndex()) {
             val cy = y0 + rowH * i + rowH / 2f
+            if (i > 0) {
+                // a hairline between rows, starting where the text starts (like an ios list)
+                stroke.color = Color.argb(255, 56, 56, 58)
+                stroke.strokeWidth = maxOf(1f, 0.5f * d)
+                val ly = y0 + rowH * i
+                c.drawLine(rect.left + pad + rowH * 0.95f, ly, rect.right - pad, ly, stroke)
+            }
             val col = gradeColor(mv)
             val dotX = rect.left + pad + rowH * 0.36f
             if (neon) {
@@ -677,9 +690,11 @@ class BoardOverlay(ctx: Context) : View(ctx) {
             text.color = Color.WHITE
             text.textSize = rowH * 0.5f
             text.textAlign = Paint.Align.LEFT
+            text.typeface = medium
             c.drawText(mv.label, rect.left + pad + rowH * 0.95f, cy + rowH * 0.18f, text)
+            text.typeface = regular
             text.textAlign = Paint.Align.RIGHT
-            text.color = Color.argb(220, 210, 220, 235)
+            text.color = Color.argb(153, 235, 235, 245)
             val ex = rect.right - pad - (if (mv.grade == Grade.BLUNDER && !mv.star) rowH * 0.9f else 0f)
             c.drawText(mv.eval, ex, cy + rowH * 0.18f, text)
             text.color = Color.WHITE

@@ -5,8 +5,6 @@ import android.app.AlertDialog
 import android.content.ClipboardManager
 import android.content.SharedPreferences
 import android.graphics.Color
-import android.graphics.Typeface
-import android.graphics.drawable.GradientDrawable
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
@@ -19,7 +17,6 @@ import android.view.View
 import android.view.ViewGroup
 import android.widget.EditText
 import android.widget.LinearLayout
-import android.widget.ScrollView
 import android.widget.TextView
 import android.widget.Toast
 import java.io.File
@@ -35,8 +32,7 @@ class ReviewActivity : Activity() {
     private class Job(val id: Int, val game: ReviewGame, val ms: Int, val rating: Int)
 
     private lateinit var prefs: SharedPreferences
-    private var accent = Color.rgb(0, 229, 255)
-    private val d get() = resources.displayMetrics.density
+    private lateinit var ui: Ios
     private val main = Handler(Looper.getMainLooper())
 
     private lateinit var root: LinearLayout
@@ -69,9 +65,6 @@ class ReviewActivity : Activity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         prefs = Cfg.prefs(this)
-        accent = Theme.accent(this, Cfg.load(this).theme)
-        window.statusBarColor = Color.rgb(10, 13, 22)
-        window.navigationBarColor = Color.rgb(10, 13, 22)
         build()
         if (intent?.getBooleanExtra("live", false) == true) startLive()
     }
@@ -100,106 +93,88 @@ class ReviewActivity : Activity() {
     // ------------------------------------------------------------------ screen
 
     private fun build() {
-        root = LinearLayout(this)
-        root.orientation = LinearLayout.VERTICAL
-        root.setPadding(dp(16f), dp(24f), dp(16f), dp(30f))
-
-        val title = TextView(this)
-        title.text = "game review"
-        title.textSize = 30f
-        title.setTypeface(Typeface.DEFAULT, Typeface.BOLD)
-        title.setTextColor(Color.WHITE)
-        title.setShadowLayer(26f, 0f, 0f, accent)
-        root.addView(title)
-        val sub = TextView(this)
-        sub.text = "labels every move like chess.com. analysis only, it never picks a move for you"
-        sub.textSize = 13f
-        sub.setTextColor(Theme.withAlpha(accent, 220))
-        sub.setPadding(0, 0, 0, dp(6f))
-        root.addView(sub)
+        ui = Ios(this)
+        val (scroll, col) = ui.screen(this, "game review", "labels every move like chess.com. analysis only, it never picks a move for you")
+        root = col
 
         // ---- where the game comes from
-        var card = newCard("game")
-        val srcRow = LinearLayout(this)
-        srcRow.orientation = LinearLayout.HORIZONTAL
-        srcRow.addView(button("live game", accent, true) { startLive() }, weight())
-        srcRow.addView(button("paste pgn", accent, false) { askPgn() }, weight())
-        card.addView(srcRow)
-        label(card, "live game = the game the helper is following. it keeps up while you play. paste pgn = any game")
-
-        // ---- settings
-        card = newCard("analysis")
-        label(card, "depth")
-        card.addView(seg(listOf("250" to "fast", "500" to "normal", "1000" to "deep"), ms().toString()) { v ->
-            prefs.edit().putInt("review_ms", v.toInt()).apply()
-            game?.let { submit(it, -2) }
-        })
-        label(card, "judge like a player rated about")
-        card.addView(seg(listOf("600" to "600", "1000" to "1000", "1500" to "1500", "2000" to "2000", "2500" to "2500"), rating().toString()) { v ->
-            prefs.edit().putInt("review_rating", v.toInt()).apply()
-            game?.let { submit(it, -2) }
-        })
-        label(card, "lower ratings are judged more kindly (the same mistake counts for less), like on chess.com")
-
-        status = TextView(this)
-        status.textSize = 13f
-        status.setTextColor(Color.argb(200, 220, 228, 240))
-        status.setPadding(dp(4f), dp(10f), 0, 0)
-        status.text = "pick a game above"
+        val src = LinearLayout(this)
+        src.orientation = LinearLayout.HORIZONTAL
+        src.addView(ui.bigButton("live game") { startLive() }, ui.weight(gap = 0f).apply { rightMargin = ui.dp(5f) })
+        src.addView(ui.bigButton("paste pgn", filled = false) { askPgn() }, ui.weight(gap = 0f).apply { leftMargin = ui.dp(5f) })
+        root.addView(src, ui.full(top = 18f))
+        status = ui.text("pick a game: live = the game the helper is following (it keeps up while you play)", 13f, ui.label2)
+        status.setPadding(ui.dp(16f), ui.dp(8f), ui.dp(16f), 0)
         root.addView(status)
 
         // ---- the board
-        card = newCard("board")
+        var g = ui.group(root, "board")
+        val boardBox = LinearLayout(this)
+        boardBox.orientation = LinearLayout.VERTICAL
+        boardBox.setPadding(ui.dp(12f), ui.dp(12f), ui.dp(12f), ui.dp(12f))
+        val frame = roundedFrame(this, ui, ui.cell2, 10f)
         board = ReviewBoardView(this)
-        card.addView(board, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
-            topMargin = dp(6f)
-        })
+        frame.addView(board)
+        boardBox.addView(frame, ui.full())
         board.show(START_FEN, null, null, 0.5f, false)
-        caption = TextView(this)
-        caption.textSize = 20f
-        caption.setTypeface(Typeface.DEFAULT, Typeface.BOLD)
-        caption.setTextColor(Color.WHITE)
-        caption.setPadding(dp(2f), dp(12f), 0, 0)
-        caption.text = "start position"
-        card.addView(caption)
-        detail = TextView(this)
-        detail.textSize = 13.5f
-        detail.setTextColor(Color.argb(190, 220, 228, 240))
-        detail.setPadding(dp(2f), dp(2f), 0, dp(8f))
-        card.addView(detail)
+        caption = ui.text("start position", 20f, ui.label, ui.bold)
+        caption.setPadding(ui.dp(2f), ui.dp(14f), 0, 0)
+        boardBox.addView(caption)
+        detail = ui.text("", 15f, ui.label2)
+        detail.setPadding(ui.dp(2f), ui.dp(4f), 0, ui.dp(12f))
+        boardBox.addView(detail)
         val nav = LinearLayout(this)
         nav.orientation = LinearLayout.HORIZONTAL
-        nav.addView(navButton("«") { goTo(0) }, weight())
-        nav.addView(navButton("‹") { goTo(ply - 1) }, weight())
-        nav.addView(navButton("›") { goTo(ply + 1) }, weight())
-        nav.addView(navButton("»") { goTo(Int.MAX_VALUE) }, weight())
-        nav.addView(navButton("flip") { board.flipped = !board.flipped }, weight())
-        card.addView(nav)
+        nav.background = ui.round(ui.fill, 9f)
+        nav.setPadding(ui.dp(2f), ui.dp(2f), ui.dp(2f), ui.dp(2f))
+        nav.addView(navButton("«") { goTo(0) }, ui.weight())
+        nav.addView(navButton("‹") { goTo(ply - 1) }, ui.weight())
+        nav.addView(navButton("›") { goTo(ply + 1) }, ui.weight())
+        nav.addView(navButton("»") { goTo(Int.MAX_VALUE) }, ui.weight())
+        nav.addView(navButton("flip") { board.flipped = !board.flipped }, ui.weight())
+        boardBox.addView(nav, ui.full())
+        val graphFrame = roundedFrame(this, ui, ui.cell2, 10f)
         graph = EvalGraphView(this)
-        graph.accent = accent
+        graph.accent = ui.blue
         graph.onSeek = { p -> goTo(p) }
-        card.addView(graph, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
-            topMargin = dp(10f)
-        })
+        graphFrame.addView(graph)
+        boardBox.addView(graphFrame, ui.full(top = 12f))
+        g.add(boardBox)
 
         // ---- summary
-        card = newCard("summary")
+        g = ui.group(root, "summary")
         summaryBox = LinearLayout(this)
         summaryBox.orientation = LinearLayout.VERTICAL
-        card.addView(summaryBox)
+        summaryBox.setPadding(ui.dp(16f), ui.dp(6f), ui.dp(16f), ui.dp(6f))
+        summaryBox.addView(ui.text("no game yet", 15f, ui.label2).apply { setPadding(0, ui.dp(6f), 0, ui.dp(6f)) })
+        g.add(summaryBox)
 
         // ---- moves
-        card = newCard("moves")
+        g = ui.group(root, "moves", "tap a move to see it on the board")
         movesBox = LinearLayout(this)
         movesBox.orientation = LinearLayout.VERTICAL
-        card.addView(movesBox)
+        movesBox.setPadding(ui.dp(8f), ui.dp(4f), ui.dp(8f), ui.dp(4f))
+        g.add(movesBox)
 
-        val scroll = ScrollView(this)
-        scroll.background = GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM, intArrayOf(
-            Color.rgb(10, 13, 22), Theme.panel(accent, 255), Color.rgb(8, 10, 18)
-        ))
-        scroll.addView(root)
+        // ---- settings
+        g = ui.group(root, "analysis", "lower ratings are judged more kindly (the same mistake counts for less), like on chess.com")
+        g.add(ui.segRow("depth", listOf("250" to "fast", "500" to "normal", "1000" to "deep"), ms().toString()) { v ->
+            prefs.edit().putInt("review_ms", v.toInt()).apply()
+            game?.let { submit(it, -2) }
+        })
+        g.add(ui.segRow("judge like a player rated", listOf("600" to "600", "1000" to "1000", "1500" to "1500", "2000" to "2000", "2500" to "2500"), rating().toString()) { v ->
+            prefs.edit().putInt("review_rating", v.toInt()).apply()
+            game?.let { submit(it, -2) }
+        })
+
         setContentView(scroll)
+    }
+
+    /** a label's color as text: the light screen needs it a bit darker to be readable */
+    private fun ink(l: Label): Int {
+        if (ui.dark) return l.color
+        val c = l.color
+        return Color.rgb((Color.red(c) * 0.78f).toInt(), (Color.green(c) * 0.78f).toInt(), (Color.blue(c) * 0.78f).toInt())
     }
 
     // ------------------------------------------------------------------ getting a game
@@ -238,7 +213,8 @@ class ReviewActivity : Activity() {
             if (clip != null && clip.length > 8 && clip.any { it.isLetter() } && clip.any { it.isDigit() }) box.setText(clip)
         } catch (_: Exception) {
         }
-        AlertDialog.Builder(this)
+        box.textSize = 15f
+        AlertDialog.Builder(this, if (ui.dark) android.R.style.Theme_DeviceDefault_Dialog_Alert else android.R.style.Theme_DeviceDefault_Light_Dialog_Alert)
             .setTitle("paste a game")
             .setView(box)
             .setPositiveButton("review") { _, _ -> loadPgn(box.text.toString()) }
@@ -367,7 +343,7 @@ class ReviewActivity : Activity() {
             cap.append(if (mv.moverWhite) "$num. " else "$num... ").append(mv.san).append("  ")
             val s = cap.length
             cap.append("${mv.label.symbol} ${mv.label.text}")
-            cap.setSpan(ForegroundColorSpan(mv.label.color), s, cap.length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+            cap.setSpan(ForegroundColorSpan(ink(mv.label)), s, cap.length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
         }
         caption.text = cap
 
@@ -395,8 +371,14 @@ class ReviewActivity : Activity() {
         if (moves.isEmpty()) return
         val w = Summary.of(moves, true)
         val b = Summary.of(moves, false)
-        summaryBox.addView(statRow("", Color.WHITE, "white", "black", header = true))
-        summaryBox.addView(statRow("accuracy", Color.WHITE, w.accuracy?.let { "$it%" } ?: "-", b.accuracy?.let { "$it%" } ?: "-", bold = true))
+        // two big accuracy tiles, then a count of every label
+        val tiles = LinearLayout(this)
+        tiles.orientation = LinearLayout.HORIZONTAL
+        tiles.setPadding(0, ui.dp(10f), 0, ui.dp(8f))
+        tiles.addView(accTile("white", w.accuracy), ui.weight().apply { rightMargin = ui.dp(5f) })
+        tiles.addView(accTile("black", b.accuracy), ui.weight().apply { leftMargin = ui.dp(5f) })
+        summaryBox.addView(tiles)
+        summaryBox.addView(statRow("", ui.label2, "white", "black", header = true))
         val order = listOf(
             Label.BRILLIANT, Label.GREAT, Label.BEST, Label.EXCELLENT, Label.GOOD, Label.BOOK,
             Label.INACCURACY, Label.MISTAKE, Label.MISS, Label.BLUNDER
@@ -405,28 +387,39 @@ class ReviewActivity : Activity() {
             val wc = w.count(l)
             val bc = b.count(l)
             if (wc == 0 && bc == 0) continue
-            summaryBox.addView(statRow("${l.symbol}  ${l.text}", l.color, wc.toString(), bc.toString()))
+            summaryBox.addView(statRow("${l.symbol}  ${l.text}", ink(l), wc.toString(), bc.toString()))
         }
     }
 
-    private fun statRow(name: String, nameColor: Int, w: String, b: String, header: Boolean = false, bold: Boolean = false): View {
+    private fun accTile(who: String, acc: Int?): View {
+        val box = LinearLayout(this)
+        box.orientation = LinearLayout.VERTICAL
+        box.gravity = Gravity.CENTER
+        box.setPadding(ui.dp(10f), ui.dp(14f), ui.dp(10f), ui.dp(14f))
+        box.background = ui.round(ui.cell2, 12f)
+        val n = ui.text(acc?.let { "$it" } ?: "-", 34f, ui.label, ui.bold)
+        n.gravity = Gravity.CENTER
+        box.addView(n)
+        val l = ui.text("$who accuracy", 13f, ui.label2)
+        l.gravity = Gravity.CENTER
+        l.setPadding(0, ui.dp(4f), 0, 0)
+        box.addView(l)
+        return box
+    }
+
+    private fun statRow(name: String, nameColor: Int, w: String, b: String, header: Boolean = false): View {
         val row = LinearLayout(this)
         row.orientation = LinearLayout.HORIZONTAL
-        row.setPadding(0, dp(5f), 0, dp(5f))
+        row.setPadding(0, ui.dp(if (header) 6f else 8f), 0, ui.dp(if (header) 2f else 8f))
         fun cell(t: String, weight: Float, color: Int, align: Int): TextView {
-            val tv = TextView(this)
-            tv.text = t
-            tv.textSize = if (header) 12f else 14.5f
-            tv.setTextColor(color)
+            val tv = ui.text(t, if (header) 13f else 16f, color, if (header) ui.regular else ui.medium)
             tv.gravity = align
-            if (bold) tv.setTypeface(Typeface.DEFAULT, Typeface.BOLD)
             row.addView(tv, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, weight))
             return tv
         }
-        val dim = Color.argb(170, 220, 228, 240)
         cell(name, 2f, nameColor, Gravity.START)
-        cell(w, 1f, if (header) dim else Color.WHITE, Gravity.CENTER)
-        cell(b, 1f, if (header) dim else Color.WHITE, Gravity.CENTER)
+        cell(w, 1f, if (header) ui.label2 else ui.label, Gravity.CENTER)
+        cell(b, 1f, if (header) ui.label2 else ui.label, Gravity.CENTER)
         return row
     }
 
@@ -444,18 +437,16 @@ class ReviewActivity : Activity() {
         while (rows.size <= rowIdx) {
             val row = LinearLayout(this)
             row.orientation = LinearLayout.HORIZONTAL
-            val num = TextView(this)
-            num.text = "${rows.size + 1}."
-            num.textSize = 13f
-            num.setTextColor(Color.argb(140, 220, 228, 240))
-            num.setPadding(0, dp(7f), 0, dp(7f))
-            row.addView(num, LinearLayout.LayoutParams(dp(34f), ViewGroup.LayoutParams.WRAP_CONTENT))
+            row.gravity = Gravity.CENTER_VERTICAL
+            if (rows.size % 2 == 1) row.background = ui.round(Theme.withAlpha(ui.fill, if (ui.dark) 90 else 60), 8f)
+            val num = ui.text("${rows.size + 1}", 14f, ui.label3)
+            num.gravity = Gravity.END
+            num.setPadding(0, ui.dp(9f), ui.dp(10f), ui.dp(9f))
+            row.addView(num, LinearLayout.LayoutParams(ui.dp(34f), ViewGroup.LayoutParams.WRAP_CONTENT))
             for (k in 0..1) {
-                val c = TextView(this)
-                c.textSize = 15f
-                c.setTextColor(Color.WHITE)
-                c.setPadding(dp(8f), dp(7f), dp(4f), dp(7f))
-                row.addView(c, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+                val c = ui.text("", 16f, ui.label, ui.medium)
+                c.setPadding(ui.dp(10f), ui.dp(9f), ui.dp(6f), ui.dp(9f))
+                row.addView(c, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply { setMargins(ui.dp(2f), ui.dp(2f), ui.dp(2f), ui.dp(2f)) })
             }
             movesBox.addView(row)
             rows.add(row)
@@ -464,7 +455,7 @@ class ReviewActivity : Activity() {
         val sb = SpannableStringBuilder(m.san)
         val s = sb.length
         sb.append("  ").append(m.label.symbol)
-        sb.setSpan(ForegroundColorSpan(m.label.color), s, sb.length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+        sb.setSpan(ForegroundColorSpan(ink(m.label)), s, sb.length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
         cell.text = sb
         cell.setOnClickListener { goTo(i + 1) }
         cells.add(cell)
@@ -472,106 +463,19 @@ class ReviewActivity : Activity() {
 
     private fun highlightCell(p: Int) {
         for ((i, c) in cells.withIndex()) {
-            c.background = if (i == p - 1) rounded(Theme.withAlpha(accent, 70), Theme.withAlpha(accent, 160), 10f) else null
+            c.background = if (i == p - 1) ui.round(Theme.withAlpha(ui.blue, if (ui.dark) 70 else 40), 7f) else null
         }
     }
 
     // ------------------------------------------------------------------ building blocks
 
-    private fun dp(v: Float) = (v * d).toInt()
-
     private fun toast(t: String) = Toast.makeText(this, t, Toast.LENGTH_LONG).show()
 
-    private fun weight() = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply {
-        setMargins(dp(3f), 0, dp(3f), 0)
-    }
-
-    private fun rounded(fillColor: Int, strokeColor: Int, radius: Float = 14f) = GradientDrawable().apply {
-        cornerRadius = radius * d
-        setColor(fillColor)
-        setStroke(dp(1.2f), strokeColor)
-    }
-
-    private fun newCard(t: String): LinearLayout {
-        val box = LinearLayout(this)
-        box.orientation = LinearLayout.VERTICAL
-        box.setPadding(dp(14f), dp(12f), dp(14f), dp(14f))
-        box.background = rounded(Color.argb(150, 20, 26, 40), Theme.withAlpha(accent, 110), 22f)
-        box.elevation = 4f * d
-        val h = TextView(this)
-        h.text = t.uppercase()
-        h.textSize = 12f
-        h.letterSpacing = 0.16f
-        h.setTextColor(accent)
-        h.setShadowLayer(12f, 0f, 0f, accent)
-        h.setPadding(0, 0, 0, dp(6f))
-        box.addView(h)
-        root.addView(box, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
-            topMargin = dp(14f)
-        })
-        return box
-    }
-
-    private fun label(parent: LinearLayout, t: String) {
-        val v = TextView(this)
-        v.text = t
-        v.textSize = 12.5f
-        v.setTextColor(Color.argb(175, 220, 228, 240))
-        v.setPadding(dp(2f), dp(8f), 0, dp(5f))
-        parent.addView(v)
-    }
-
-    private fun seg(options: List<Pair<String, String>>, current: String, onPick: (String) -> Unit): View {
-        val row = LinearLayout(this)
-        row.orientation = LinearLayout.HORIZONTAL
-        row.setPadding(dp(3f), dp(3f), dp(3f), dp(3f))
-        row.background = rounded(Color.argb(55, 255, 255, 255), Color.argb(35, 255, 255, 255), 16f)
-        val views = ArrayList<TextView>()
-        fun paint(sel: String) {
-            for ((i, v) in views.withIndex()) {
-                val on = options[i].first == sel
-                v.background = if (on) rounded(accent, accent, 13f) else null
-                v.setTextColor(if (on) Color.BLACK else Color.argb(220, 255, 255, 255))
-            }
-        }
-        for ((value, text) in options) {
-            val t = TextView(this)
-            t.text = text
-            t.textSize = 13.5f
-            t.gravity = Gravity.CENTER
-            t.setPadding(dp(4f), dp(9f), dp(4f), dp(9f))
-            t.setOnClickListener {
-                paint(value)
-                onPick(value)
-            }
-            views.add(t)
-            row.addView(t, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
-        }
-        paint(current)
-        return row
-    }
-
-    private fun button(text: String, col: Int, filled: Boolean, onClick: () -> Unit): View {
-        val t = TextView(this)
-        t.text = text
-        t.textSize = 15f
-        t.gravity = Gravity.CENTER
-        t.setTypeface(Typeface.DEFAULT, Typeface.BOLD)
-        t.setPadding(dp(12f), dp(13f), dp(12f), dp(13f))
-        t.background = if (filled) rounded(col, Theme.core(col), 18f) else rounded(Theme.withAlpha(col, 30), Theme.withAlpha(col, 200), 18f)
-        t.setTextColor(if (filled) Color.BLACK else col)
-        t.setOnClickListener { onClick() }
-        return t
-    }
-
     private fun navButton(text: String, onClick: () -> Unit): View {
-        val t = TextView(this)
-        t.text = text
-        t.textSize = 20f
+        val t = ui.text(text, 17f, ui.blue, ui.medium)
         t.gravity = Gravity.CENTER
-        t.setTextColor(Color.WHITE)
-        t.setPadding(dp(4f), dp(9f), dp(4f), dp(9f))
-        t.background = rounded(Color.argb(40, 255, 255, 255), Color.argb(60, 255, 255, 255), 14f)
+        t.setPadding(ui.dp(4f), ui.dp(9f), ui.dp(4f), ui.dp(9f))
+        t.background = ui.pressable(android.graphics.drawable.ColorDrawable(Color.TRANSPARENT), ui.round(ui.segOn, 7f))
         t.setOnClickListener { onClick() }
         return t
     }

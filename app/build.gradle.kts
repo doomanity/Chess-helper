@@ -11,9 +11,24 @@ android {
         applicationId = "com.example.chesshelper"
         minSdk = 30
         targetSdk = 34
-        versionCode = 1
-        versionName = "1.0"
+        // every build gets a bigger number (github's run number), so the phone installs it as an update
+        versionCode = (System.getenv("GITHUB_RUN_NUMBER")?.toIntOrNull() ?: 0) + 100
+        versionName = "1.1"
         ndk { abiFilters += listOf("arm64-v8a") }
+    }
+
+    // one fixed key for every build, taken from the repo's secrets (see the readme). without it each github build
+    // signs with a new random key, and android refuses to install it over the old app (uninstall, settings lost)
+    signingConfigs {
+        getByName("debug") {
+            val store = System.getenv("SIGNING_STORE")
+            if (store != null && file(store).exists()) {
+                storeFile = file(store)
+                storePassword = System.getenv("SIGNING_PASSWORD")
+                keyAlias = System.getenv("SIGNING_ALIAS") ?: "chesshelper"
+                keyPassword = System.getenv("SIGNING_PASSWORD")
+            }
+        }
     }
 
     compileOptions {

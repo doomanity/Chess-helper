@@ -2,12 +2,10 @@ package com.example.chesshelper
 
 import android.animation.ValueAnimator
 import android.content.Context
-import android.content.res.ColorStateList
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
 import android.graphics.PixelFormat
-import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
 import android.view.Gravity
 import android.view.MotionEvent
@@ -18,8 +16,6 @@ import android.view.animation.OvershootInterpolator
 import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.ScrollView
-import android.widget.SeekBar
-import android.widget.TextView
 import kotlin.math.abs
 
 /** what the side menu needs from the service */
@@ -165,42 +161,39 @@ class SideBar(private val ctx: Context, private val wm: WindowManager, private v
             if (circleMode) drawCircle(canvas) else drawBar(canvas)
         }
 
+        /** a soft white pill, like the iphone's home bar, with a faint dark edge so it shows on light apps too */
         private fun drawBar(canvas: Canvas) {
-            val x = if (cfg.handleRight) width - 8f * d else 8f * d
-            val top = height * 0.12f
-            val bottom = height * 0.88f
-            p.color = Theme.withAlpha(accent, (60 * vis).toInt())
-            p.strokeWidth = 13f * d
+            val x = if (cfg.handleRight) width - 7f * d else 7f * d
+            val top = height * 0.14f
+            val bottom = height * 0.86f
+            p.color = Theme.withAlpha(Color.BLACK, (70 * vis).toInt())
+            p.strokeWidth = 7f * d
             canvas.drawLine(x, top, x, bottom, p)
-            p.color = Theme.withAlpha(accent, (170 * vis).toInt())
-            p.strokeWidth = 6f * d
-            canvas.drawLine(x, top, x, bottom, p)
-            p.color = Theme.withAlpha(Color.WHITE, (240 * vis).toInt())
-            p.strokeWidth = 2.6f * d
+            p.color = Theme.withAlpha(Color.WHITE, (235 * vis).toInt())
+            p.strokeWidth = 5f * d
             canvas.drawLine(x, top, x, bottom, p)
         }
 
+        /** like the iphone's assistive touch button: a dark rounded square with soft white rings */
         private fun drawCircle(canvas: Canvas) {
             val cx = width / 2f
             val cy = height / 2f
-            val r = width * 0.36f
-            f.color = Theme.withAlpha(accent, (55 * vis).toInt())
-            canvas.drawCircle(cx, cy, r * 1.32f, f)
-            f.color = Theme.withAlpha(Theme.panel(accent, 255), (235 * vis).toInt())
-            canvas.drawCircle(cx, cy, r, f)
-            p.color = Theme.withAlpha(accent, (255 * vis).toInt())
-            p.strokeWidth = 2.6f * d
-            canvas.drawCircle(cx, cy, r, p)
-            p.color = Theme.withAlpha(Theme.core(accent), (200 * vis).toInt())
-            p.strokeWidth = 1f * d
-            canvas.drawCircle(cx, cy, r, p)
-            // a small knight
-            f.color = Theme.withAlpha(Color.WHITE, (245 * vis).toInt())
-            f.textSize = r * 1.15f
-            f.textAlign = Paint.Align.CENTER
-            f.setShadowLayer(r * 0.35f, 0f, 0f, Theme.withAlpha(accent, (255 * vis).toInt()))
-            canvas.drawText(if (host.isPaused()) "\u275A\u275A" else "\u265E", cx, cy + r * 0.4f, f)
+            val half = width * 0.42f
+            val rr = half * 0.62f
+            f.color = Theme.withAlpha(Color.rgb(28, 28, 30), (200 * vis).toInt())
+            f.setShadowLayer(6f * d, 0f, 2f * d, Theme.withAlpha(Color.BLACK, (90 * vis).toInt()))
+            canvas.drawRoundRect(cx - half, cy - half, cx + half, cy + half, rr, rr, f)
             f.clearShadowLayer()
+            f.color = Theme.withAlpha(Color.WHITE, (70 * vis).toInt())
+            canvas.drawCircle(cx, cy, half * 0.72f, f)
+            f.color = Theme.withAlpha(Color.WHITE, (110 * vis).toInt())
+            canvas.drawCircle(cx, cy, half * 0.55f, f)
+            f.color = Theme.withAlpha(Color.WHITE, (245 * vis).toInt())
+            canvas.drawCircle(cx, cy, half * 0.40f, f)
+            f.color = Theme.withAlpha(Color.rgb(28, 28, 30), (235 * vis).toInt())
+            f.textSize = half * 0.52f
+            f.textAlign = Paint.Align.CENTER
+            canvas.drawText(if (host.isPaused()) "\u275A\u275A" else "\u265E", cx, cy + half * 0.19f, f)
         }
 
         override fun onTouchEvent(e: MotionEvent): Boolean {
@@ -331,13 +324,9 @@ class SideBar(private val ctx: Context, private val wm: WindowManager, private v
         scroll.isVerticalScrollBarEnabled = false
         val box = LinearLayout(ctx)
         box.orientation = LinearLayout.VERTICAL
-        box.setPadding(dp(18f), dp(16f), dp(18f), dp(18f))
+        box.setPadding(dp(14f), dp(16f), dp(14f), dp(18f))
         scroll.addView(box)
-        scroll.background = GradientDrawable().apply {
-            cornerRadius = 26f * d
-            setColor(Theme.panel(accent, 242))
-            setStroke(dp(1.5f), Theme.withAlpha(accent, 200))
-        }
+        scroll.background = sheet()
         scroll.elevation = 18f * d
         scroll.clipToOutline = true
         root.addView(scroll, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT).apply {
@@ -394,288 +383,153 @@ class SideBar(private val ctx: Context, private val wm: WindowManager, private v
         e.apply()
     }
 
+    /** the menu's background: a dark rounded sheet, like ios control center */
+    private fun sheet() = GradientDrawable().apply {
+        cornerRadius = 30f * d
+        setColor(Color.argb(246, 14, 14, 16))
+        setStroke(maxOf(1, dp(0.6f)), Color.argb(40, 255, 255, 255))
+    }
+
     /** fills the menu with the current settings */
     private fun rebuild() {
         val box = panelBox ?: return
         cfg = Cfg.load(ctx)
         accent = Theme.accent(ctx, cfg.theme)
+        val ui = Ios(ctx, forceDark = true)
         box.removeAllViews()
-        (box.parent as? View)?.background = GradientDrawable().apply {
-            cornerRadius = 26f * d
-            setColor(Theme.panel(accent, 242))
-            setStroke(dp(1.5f), Theme.withAlpha(accent, 200))
-        }
 
-        // header
+        // header: title, what the helper is doing, a round close button
         val header = LinearLayout(ctx)
         header.orientation = LinearLayout.HORIZONTAL
         header.gravity = Gravity.CENTER_VERTICAL
-        val title = TextView(ctx)
-        title.text = "chess helper"
-        title.textSize = 20f
-        title.setTypeface(Typeface.DEFAULT, Typeface.BOLD)
-        title.setTextColor(Color.WHITE)
-        title.setShadowLayer(14f, 0f, 0f, accent)
-        header.addView(title, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
-        val close = TextView(ctx)
-        close.text = "✕"
-        close.textSize = 18f
-        close.setTextColor(Color.argb(200, 255, 255, 255))
-        close.setPadding(dp(10f), dp(4f), dp(4f), dp(4f))
+        val titles = LinearLayout(ctx)
+        titles.orientation = LinearLayout.VERTICAL
+        titles.addView(ui.text("chess helper", 22f, ui.label, ui.bold))
+        val status = ui.text(host.status(), 13f, ui.label2)
+        status.setPadding(0, dp(3f), 0, 0)
+        titles.addView(status)
+        header.addView(titles, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+        val close = ui.text("✕", 14f, ui.label2, ui.bold)
+        close.gravity = Gravity.CENTER
+        close.background = ui.round(ui.cell2, 100f)
         close.setOnClickListener { closePanel() }
-        header.addView(close)
+        header.addView(close, LinearLayout.LayoutParams(dp(30f), dp(30f)))
+        header.setPadding(dp(4f), 0, 0, dp(14f))
         box.addView(header)
-        val status = TextView(ctx)
-        status.text = host.status()
-        status.textSize = 12f
-        status.setTextColor(Theme.withAlpha(accent, 230))
-        status.setPadding(0, dp(2f), 0, dp(10f))
-        box.addView(status)
 
-        // big buttons
+        // control center style tiles
         val saves = host.savesLeft()
-        val row = LinearLayout(ctx)
-        row.orientation = LinearLayout.HORIZONTAL
-        row.addView(bigButton("↻", "rethink", accent) { host.onRethink(); closePanel() }, weight())
-        row.addView(bigButton("★", if (saves < 0) "max power" else "max power ($saves)", Theme.GOLD, enabled = saves != 0) {
+        val paused = host.isPaused()
+        val row1 = LinearLayout(ctx)
+        row1.orientation = LinearLayout.HORIZONTAL
+        row1.addView(tile(ui, "↻", "rethink", ui.blue) { host.onRethink(); closePanel() }, weight())
+        row1.addView(tile(ui, "★", if (saves < 0) "max power" else "max power · $saves", ui.orange, enabled = saves != 0) {
             host.onMaxPower(); closePanel()
         }, weight())
-        row.addView(bigButton("⟲", "new game", Color.rgb(160, 170, 190)) { host.onNewGame(); closePanel() }, weight())
-        box.addView(row)
-        val paused = host.isPaused()
-        box.addView(bigButton(if (paused) "▶" else "❚❚", if (paused) "resume" else "pause", if (paused) Color.rgb(0, 200, 83) else Color.rgb(255, 196, 0)) {
+        row1.addView(tile(ui, "⟲", "new game", ui.gray) { host.onNewGame(); closePanel() }, weight())
+        box.addView(row1)
+        val row2 = LinearLayout(ctx)
+        row2.orientation = LinearLayout.HORIZONTAL
+        row2.addView(tile(ui, if (paused) "▶" else "❚❚", if (paused) "resume" else "pause", if (paused) ui.green else ui.orange, wide = true) {
             host.onPauseToggle(); closePanel()
-        }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
-            setMargins(dp(3f), dp(3f), dp(3f), dp(3f))
-        })
-        box.addView(bigButton("♞", "review this game", Theme.GOLD) { host.onReview(); closePanel() },
-            LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
-                setMargins(dp(3f), dp(3f), dp(3f), dp(3f))
-            })
+        }, weight())
+        row2.addView(tile(ui, "♞", "review game", ui.indigo, wide = true) { host.onReview(); closePanel() }, weight())
+        box.addView(row2)
 
-        section("i play")
-        box.addView(seg(listOf("white" to "white", "black" to "black"), if (cfg.iAmWhite) "white" else "black") { v ->
+        var g = ui.group(box, "game")
+        g.add(ui.segRow("i play", listOf("white" to "white", "black" to "black"), if (cfg.iAmWhite) "white" else "black") { v ->
             save { it.putString("color", v) }
         })
-
-        section("engine")
-        box.addView(seg(listOf("stockfish" to "stockfish", "maia3" to "maia3 (pc)"), if (cfg.useMaia) "maia3" else "stockfish") { v ->
+        g.add(ui.segRow("engine", listOf("stockfish" to "stockfish", "maia3" to "maia3 (pc)"), if (cfg.useMaia) "maia3" else "stockfish") { v ->
             save { it.putString("engine", v) }
             box.post { rebuild() }
         })
         if (cfg.useMaia) {
-            box.addView(slider(600, 2600, 100, cfg.maiaElo, { "maia3 plays like: $it" }) { v -> save { it.putInt("maia_elo", v) } })
-            box.addView(slider(0, 100, 5, cfg.maiaHuman, { if (it == 0) "human-ness: 0% (always maia's top pick)" else "human-ness: $it%" }) { v ->
-                save { it.putInt("maia_human", v) }
-            })
-            if (cfg.maiaHost.isEmpty()) note("set the pc address in the app first")
+            g.add(ui.sliderRow("plays like", 600, 2600, 100, cfg.maiaElo, { "$it" }) { v -> save { it.putInt("maia_elo", v) } })
+            g.add(ui.sliderRow("human-ness", 0, 100, 5, cfg.maiaHuman, { if (it == 0) "top pick" else "$it%" }) { v -> save { it.putInt("maia_human", v) } })
+            if (cfg.maiaHost.isEmpty()) g.add(ui.noteRow("set the pc address in the app first", ui.orange, 13f))
         } else {
-            box.addView(slider(UciEngine.MIN_ELO, UciEngine.MAX_ELO, 10, cfg.elo,
-                { if (it >= UciEngine.MAX_ELO) "stockfish strength: full power" else "stockfish strength: elo $it" }) { v ->
-                save { it.putInt("elo2", v) }
-            })
+            g.add(ui.sliderRow("strength", UciEngine.MIN_ELO, UciEngine.MAX_ELO, 10, cfg.elo,
+                { if (it >= UciEngine.MAX_ELO) "full power" else "elo $it" }) { v -> save { it.putInt("elo2", v) } })
         }
-
-        section("moves shown")
-        box.addView(seg((1..4).map { it.toString() to it.toString() }, cfg.nMoves.toString()) { v ->
+        g.add(ui.segRow("moves shown", (1..4).map { it.toString() to it.toString() }, cfg.nMoves.toString()) { v ->
             save { it.putInt("n_moves", v.toInt()) }
         })
 
-        section("show")
-        val chips = LinearLayout(ctx)
-        chips.orientation = LinearLayout.HORIZONTAL
-        chips.addView(chip("eval bar", cfg.showEval) { on -> save { it.putBoolean("show_eval", on) } }, weight())
-        chips.addView(chip("threat", cfg.showThreat) { on -> save { it.putBoolean("show_threat", on) } }, weight())
-        chips.addView(chip("best line", cfg.showLine) { on -> save { it.putBoolean("show_line", on) } }, weight())
-        box.addView(chips)
-        val chips2 = LinearLayout(ctx)
-        chips2.orientation = LinearLayout.HORIZONTAL
-        chips2.addView(chip("guess bot move", cfg.predict) { on -> save { it.putBoolean("predict", on) } }, weight())
-        chips2.addView(chip("accuracy", cfg.showAcc) { on -> save { it.putBoolean("show_acc", on) } }, weight())
-        box.addView(chips2)
+        g = ui.group(box, "show")
+        g.add(ui.toggleRow("eval bar", cfg.showEval) { on -> save { it.putBoolean("show_eval", on) } })
+        g.add(ui.toggleRow("threat", cfg.showThreat) { on -> save { it.putBoolean("show_threat", on) } })
+        g.add(ui.toggleRow("best line", cfg.showLine) { on -> save { it.putBoolean("show_line", on) } })
+        g.add(ui.toggleRow("accuracy", cfg.showAcc) { on -> save { it.putBoolean("show_acc", on) } })
+        g.add(ui.toggleRow("guess the bot's move", cfg.predict) { on -> save { it.putBoolean("predict", on) } })
+        g.add(ui.toggleRow("premove", cfg.premove) { on -> save { it.putBoolean("premove", on) } })
+        g.add(ui.toggleRow("move labels", cfg.showLabels) { on -> save { it.putBoolean("show_labels", on) } })
 
-        section("arrow style")
-        box.addView(seg(listOf("neon" to "neon", "solid" to "solid", "minimal" to "minimal"), cfg.style) { v ->
+        g = ui.group(box, "look")
+        g.add(ui.segRow("arrows", listOf("neon" to "neon", "solid" to "solid", "minimal" to "minimal"), cfg.style) { v ->
             save { it.putString("arrow_style", v) }
         })
+        g.add(ui.segRow("color", Theme.PRESETS.keys.map { it to it }, cfg.theme) { v -> save { it.putString("theme", v) } })
+        g.add(ui.toggleRow("animations", cfg.anim) { on -> save { it.putBoolean("anim", on) } })
+        g.add(ui.sliderRow("animation speed", 50, 200, 10, (cfg.animSpeed * 100).toInt(), { "$it%" }) { v -> save { it.putInt("anim_speed", v) } })
+        g.add(ui.sliderRow("arrow size", 60, 160, 5, (cfg.arrowSize * 100).toInt(), { "$it%" }) { v -> save { it.putInt("arrow_size", v) } })
+        g.add(ui.sliderRow("card size", 70, 140, 5, (cfg.cardSize * 100).toInt(), { "$it%" }) { v -> save { it.putInt("card_size", v) } })
+        g.add(ui.sliderRow("opacity", 30, 100, 5, (cfg.opacity * 100).toInt(), { "$it%" }) { v -> save { it.putInt("opacity", v) } })
 
-        section("effects")
-        box.addView(chip("animations", cfg.anim) { on -> save { it.putBoolean("anim", on) } })
-        box.addView(slider(50, 200, 10, (cfg.animSpeed * 100).toInt(), { "animation speed: ${it}%" }) { v -> save { it.putInt("anim_speed", v) } })
-        box.addView(slider(60, 160, 5, (cfg.arrowSize * 100).toInt(), { "arrow size: ${it}%" }) { v -> save { it.putInt("arrow_size", v) } })
-        box.addView(slider(70, 140, 5, (cfg.cardSize * 100).toInt(), { "card size: ${it}%" }) { v -> save { it.putInt("card_size", v) } })
-        box.addView(slider(30, 100, 5, (cfg.opacity * 100).toInt(), { "opacity: ${it}%" }) { v -> save { it.putInt("opacity", v) } })
-
-        section("theme")
-        box.addView(seg(Theme.PRESETS.keys.map { it to it }, cfg.theme) { v ->
-            save { it.putString("theme", v) }
-            box.post { rebuild() }
-        })
-
-        section("handle")
-        box.addView(seg(listOf("bar" to "edge bar", "circle" to "circle"), cfg.handleMode) { v ->
+        g = ui.group(box, "handle")
+        g.add(ui.segRow(null, listOf("bar" to "edge bar", "circle" to "circle"), cfg.handleMode) { v ->
             save { it.putString("handle_mode", v) }
             box.post { rebuild() }
         })
         if (!circleMode) {
-            box.addView(seg(listOf("left" to "left edge", "right" to "right edge"), if (cfg.handleRight) "right" else "left") { v ->
+            g.add(ui.segRow(null, listOf("left" to "left edge", "right" to "right edge"), if (cfg.handleRight) "right" else "left") { v ->
                 save { it.putString("handle_side", v) }
-            }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(6f) })
+            })
         }
-        box.addView(slider(70, 180, 10, (cfg.handleSize * 100).toInt(), { "handle size: $it%" }) { v -> save { it.putInt("handle_size", v) } })
-        box.addView(slider(0, 100, 5, (cfg.handleIdle * 100).toInt(), { "visible when not touched: $it%" }) { v -> save { it.putInt("handle_idle", v) } })
-
-        section("max power saves per game")
-        box.addView(seg(listOf("1" to "1", "3" to "3", "5" to "5", "-1" to "∞"), cfg.savesPerGame.toString()) { v ->
+        g.add(ui.sliderRow("size", 70, 180, 10, (cfg.handleSize * 100).toInt(), { "$it%" }) { v -> save { it.putInt("handle_size", v) } })
+        g.add(ui.sliderRow("visible when idle", 0, 100, 5, (cfg.handleIdle * 100).toInt(), { "$it%" }) { v -> save { it.putInt("handle_idle", v) } })
+        g.add(ui.segRow("max power saves per game", listOf("1" to "1", "3" to "3", "5" to "5", "-1" to "∞"), cfg.savesPerGame.toString()) { v ->
             save { it.putInt("saves", v.toInt()) }
         })
 
-        val stop = bigButton("■", "stop helper", Color.rgb(255, 82, 82)) { closePanel(false); host.onStopHelper() }
-        box.addView(stop, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
-            topMargin = dp(18f)
-        })
+        g = ui.group(box, null)
+        g.add(ui.buttonRow("stop helper", ui.red) { closePanel(false); host.onStopHelper() })
     }
 
     // ------------------------------------------------------------------ little building blocks
 
     private fun weight() = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply {
-        setMargins(dp(3f), dp(3f), dp(3f), dp(3f))
+        setMargins(dp(4f), dp(4f), dp(4f), dp(4f))
     }
 
-    private fun section(t: String) {
-        val v = TextView(ctx)
-        v.text = t.uppercase()
-        v.textSize = 11f
-        v.letterSpacing = 0.14f
-        v.setTextColor(Color.argb(170, 220, 228, 240))
-        v.setPadding(dp(2f), dp(14f), 0, dp(6f))
-        panelBox?.addView(v)
-    }
-
-    private fun note(t: String) {
-        val v = TextView(ctx)
-        v.text = t
-        v.textSize = 12f
-        v.setTextColor(Color.rgb(255, 180, 80))
-        v.setPadding(dp(2f), dp(2f), 0, 0)
-        panelBox?.addView(v)
-    }
-
-    private fun rounded(fillColor: Int, strokeColor: Int, radius: Float = 14f) = GradientDrawable().apply {
-        cornerRadius = radius * d
-        setColor(fillColor)
-        setStroke(dp(1.2f), strokeColor)
-    }
-
-    private fun bigButton(icon: String, label: String, col: Int, enabled: Boolean = true, onClick: () -> Unit): View {
+    /** a control center tile: a colored round icon over a short label */
+    private fun tile(ui: Ios, icon: String, label: String, col: Int, enabled: Boolean = true, wide: Boolean = false, onClick: () -> Unit): View {
         val v = LinearLayout(ctx)
-        v.orientation = LinearLayout.VERTICAL
-        v.gravity = Gravity.CENTER
-        v.setPadding(dp(6f), dp(10f), dp(6f), dp(10f))
-        v.background = rounded(Theme.withAlpha(col, if (enabled) 40 else 15), Theme.withAlpha(col, if (enabled) 210 else 70), 18f)
-        val i = TextView(ctx)
-        i.text = icon
-        i.textSize = 20f
+        v.orientation = if (wide) LinearLayout.HORIZONTAL else LinearLayout.VERTICAL
+        v.gravity = if (wide) Gravity.CENTER_VERTICAL else Gravity.CENTER
+        v.setPadding(dp(12f), dp(12f), dp(12f), dp(12f))
+        v.background = ui.pressable(ui.round(ui.cell, 20f), ui.round(ui.pressed, 20f))
+        v.alpha = if (enabled) 1f else 0.4f
+        val i = ui.text(icon, 17f, Color.WHITE, ui.bold)
         i.gravity = Gravity.CENTER
-        i.setTextColor(if (enabled) col else Color.GRAY)
-        if (enabled) i.setShadowLayer(16f, 0f, 0f, col)
-        val l = TextView(ctx)
-        l.text = label
-        l.textSize = 12f
-        l.gravity = Gravity.CENTER
-        l.setTextColor(if (enabled) Color.WHITE else Color.GRAY)
-        v.addView(i)
-        v.addView(l)
+        i.background = ui.round(col, 100f)
+        v.addView(i, LinearLayout.LayoutParams(dp(38f), dp(38f)))
+        val l = ui.text(label, 13f, ui.label, ui.medium)
+        l.maxLines = 1
+        if (wide) {
+            l.setPadding(dp(10f), 0, 0, 0)
+            v.addView(l)
+        } else {
+            l.gravity = Gravity.CENTER
+            l.setPadding(0, dp(8f), 0, 0)
+            v.addView(l)
+        }
         if (enabled) v.setOnClickListener {
-            if (cfg.anim) it.animate().scaleX(0.92f).scaleY(0.92f).setDuration(80).withEndAction {
+            if (cfg.anim) it.animate().scaleX(0.94f).scaleY(0.94f).setDuration(80).withEndAction {
                 it.animate().scaleX(1f).scaleY(1f).setDuration(120).start()
                 onClick()
             }.start() else onClick()
         }
         return v
-    }
-
-    /** a row of options, one of them picked */
-    private fun seg(options: List<Pair<String, String>>, current: String, onPick: (String) -> Unit): View {
-        val row = LinearLayout(ctx)
-        row.orientation = LinearLayout.HORIZONTAL
-        row.setPadding(dp(3f), dp(3f), dp(3f), dp(3f))
-        row.background = rounded(Color.argb(60, 255, 255, 255), Color.argb(40, 255, 255, 255), 16f)
-        val views = ArrayList<TextView>()
-        fun paint(sel: String) {
-            for ((i, v) in views.withIndex()) {
-                val on = options[i].first == sel
-                v.background = if (on) rounded(accent, accent, 13f) else null
-                v.setTextColor(if (on) Color.BLACK else Color.argb(220, 255, 255, 255))
-                v.setShadowLayer(if (on) 0f else 0f, 0f, 0f, 0)
-                v.elevation = if (on) 6f * d else 0f
-            }
-        }
-        for ((value, label) in options) {
-            val t = TextView(ctx)
-            t.text = label
-            t.textSize = 13f
-            t.gravity = Gravity.CENTER
-            t.setPadding(dp(4f), dp(8f), dp(4f), dp(8f))
-            t.setOnClickListener {
-                paint(value)
-                onPick(value)
-            }
-            views.add(t)
-            row.addView(t, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
-        }
-        paint(current)
-        return row
-    }
-
-    private fun chip(label: String, on: Boolean, onToggle: (Boolean) -> Unit): View {
-        val t = TextView(ctx)
-        var state = on
-        t.text = label
-        t.textSize = 13f
-        t.gravity = Gravity.CENTER
-        t.setPadding(dp(8f), dp(9f), dp(8f), dp(9f))
-        fun paint() {
-            t.background = if (state) rounded(Theme.withAlpha(accent, 60), accent) else rounded(Color.argb(40, 255, 255, 255), Color.argb(50, 255, 255, 255))
-            t.setTextColor(if (state) Color.WHITE else Color.argb(160, 255, 255, 255))
-            if (state) t.setShadowLayer(12f, 0f, 0f, accent) else t.setShadowLayer(0f, 0f, 0f, 0)
-        }
-        paint()
-        t.setOnClickListener {
-            state = !state
-            paint()
-            onToggle(state)
-        }
-        return t
-    }
-
-    /** a slider with its label above it; the setting is saved when you let go */
-    private fun slider(min: Int, max: Int, step: Int, value: Int, label: (Int) -> String, onSet: (Int) -> Unit): View {
-        val box = LinearLayout(ctx)
-        box.orientation = LinearLayout.VERTICAL
-        box.setPadding(0, dp(6f), 0, 0)
-        val l = TextView(ctx)
-        l.textSize = 13f
-        l.setTextColor(Color.WHITE)
-        l.setPadding(dp(2f), 0, 0, 0)
-        val s = SeekBar(ctx)
-        s.max = (max - min) / step
-        s.progress = ((value.coerceIn(min, max) - min) / step)
-        s.progressTintList = ColorStateList.valueOf(accent)
-        s.thumbTintList = ColorStateList.valueOf(accent)
-        s.progressBackgroundTintList = ColorStateList.valueOf(Color.argb(90, 255, 255, 255))
-        l.text = label(min + s.progress * step)
-        s.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
-            override fun onProgressChanged(sb: SeekBar?, p: Int, fromUser: Boolean) {
-                l.text = label(min + p * step)
-            }
-            override fun onStartTrackingTouch(sb: SeekBar?) {}
-            override fun onStopTrackingTouch(sb: SeekBar?) {
-                onSet(min + s.progress * step)
-            }
-        })
-        box.addView(l)
-        box.addView(s)
-        return box
     }
 }

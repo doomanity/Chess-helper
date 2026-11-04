@@ -52,9 +52,9 @@ object Labeler {
     const val INACCURACY_MAX = 0.10
     const val MISTAKE_MAX = 0.20
 
-    const val GREAT_GAP = 0.15        // the second best move has to be this much worse than the best one
+    const val GREAT_GAP = 0.10        // the second best move has to be this much worse than the best one
     const val BRILLIANT_AFTER = -50   // after a brilliant move you are at least equal (centipawns)
-    const val BRILLIANT_BEFORE = 550  // and you were not already winning by a lot
+    const val BRILLIANT_BEFORE = 550  // and without it (the second best move) you would not be winning by a lot
     const val BRILLIANT_LEAD = 1000   // (a queen up is already crushing)
     const val SACRIFICE_MIN = 200     // gives up at least this much material (centipawns)
 
@@ -76,8 +76,14 @@ object Labeler {
         return 0.55 + 0.45 * t
     }
 
-    /** equal (1), clearly winning (2) or clearly losing (0) */
-    private fun group(ep: Double): Int = if (ep >= 0.65) 2 else if (ep <= 0.35) 0 else 1
+    /** lost (0), worse (1), equal (2), better (3), winning (4) */
+    private fun group(ep: Double): Int = when {
+        ep < 0.15 -> 0
+        ep < 0.35 -> 1
+        ep <= 0.65 -> 2
+        ep < 0.85 -> 3
+        else -> 4
+    }
 
     fun loss(p: PlyInput, rating: Int): Double {
         if (p.playedUci == p.bestUci) return 0.0
@@ -90,12 +96,15 @@ object Labeler {
         val lost = loss(p, rating)
         val bestLike = lost <= BEST_MAX
 
-        // brilliant: a good piece sacrifice. you stay at least equal, and were not winning big already
+        // brilliant: a good piece sacrifice. you stay at least equal, and you would not be winning big without it.
+        // (the sacrifice itself may lead to a mate, that is the point. what counts is that the quiet moves don't win)
+        val winsAnyway = p.secondScore != null && p.secondScore >= BRILLIANT_BEFORE
         if (p.sacrifice && lost <= EXCELLENT_MAX && p.afterScore >= BRILLIANT_AFTER &&
-            p.bestScore < BRILLIANT_BEFORE && p.materialLead < BRILLIANT_LEAD) {
+            !winsAnyway && p.materialLead < BRILLIANT_LEAD) {
             return Label.BRILLIANT
         }
-        // great: the only move that wins (equal -> winning) or saves (losing -> equal)
+        // great: the only good move. every other move gives away a real chunk and drops you a step
+        // (winning -> only better, equal -> worse, losing -> lost)
         if (bestLike && !p.isRecapture && p.secondScore != null) {
             val epSecond = ep(p.secondScore, rating)
             if (epBest - epSecond >= GREAT_GAP && group(epBest) > group(epSecond)) return Label.GREAT
