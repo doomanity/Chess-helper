@@ -80,6 +80,7 @@ class ChessService : Service(), SideBarHost, SharedPreferences.OnSharedPreferenc
     private var aiBlockedUntil = 0L
     private var engineName = "stockfish"
     private var tracker: Tracker? = null
+    private var savedLogVersion = -1 // the game record (for the review screen) that was last saved
 
     // live accuracy: the engine score of every position we saw (white's side), and the move waiting for its score
     private val accuracy = Accuracy()
@@ -212,6 +213,20 @@ class ChessService : Service(), SideBarHost, SharedPreferences.OnSharedPreferenc
     override fun onNewGame() { wantNewGame = true }
 
     override fun onStopHelper() { main.post { stopSelf() } }
+
+    /** opens the game review on the game that is being played right now */
+    override fun onReview() {
+        main.post {
+            try {
+                val i = Intent(this, ReviewActivity::class.java)
+                i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                i.putExtra("live", true)
+                startActivity(i)
+            } catch (e: Exception) {
+                toast("can't open the review: ${e.message}")
+            }
+        }
+    }
 
     override fun onPauseToggle() {
         paused = !paused
@@ -516,6 +531,11 @@ class ChessService : Service(), SideBarHost, SharedPreferences.OnSharedPreferenc
 
         debugLine(tracker, step)
         val b = tracker.board ?: return step
+        if (tracker.logVersion != savedLogVersion) {
+            // keep a record of the game so the review screen can open it
+            savedLogVersion = tracker.logVersion
+            GameLog.save(this, tracker.startFen, tracker.playedMoves)
+        }
         val wb = tracker.whiteBottom ?: c.iAmWhite
         val fen = b.fen
         val key = Game.posKey(fen)

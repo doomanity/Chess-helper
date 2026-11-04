@@ -161,6 +161,13 @@ class MainActivity : Activity() {
         label(card, "max power saves per game")
         card.addView(seg(listOf("1" to "1", "3" to "3", "5" to "5", "-1" to "∞"), c.savesPerGame.toString()) { v -> save { it.putInt("saves", v.toInt()) } })
 
+        // ---- game review
+        card = newCard("game review")
+        label(card, "labels every move like chess.com (brilliant, great, best, book, mistake, blunder...) for the game you just played or any pasted pgn. analysis only, it never picks a move for you")
+        card.addView(button("open game review", Theme.GOLD, filled = false) {
+            startActivity(Intent(this, ReviewActivity::class.java))
+        }, full(top = 8f))
+
         // ---- buttons
         root.addView(button("allow draw over other apps", Color.rgb(160, 170, 190), filled = false) {
             startActivity(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:$packageName")))

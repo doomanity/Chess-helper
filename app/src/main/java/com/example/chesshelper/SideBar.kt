@@ -28,6 +28,7 @@ interface SideBarHost {
     fun onMaxPower()
     fun onNewGame()
     fun onStopHelper()
+    fun onReview()
     fun onPauseToggle()
     fun isPaused(): Boolean
     fun onPanelOpen(open: Boolean)
@@ -447,6 +448,10 @@ class SideBar(private val ctx: Context, private val wm: WindowManager, private v
         }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
             setMargins(dp(3f), dp(3f), dp(3f), dp(3f))
         })
+        box.addView(bigButton("♞", "review this game", Theme.GOLD) { host.onReview(); closePanel() },
+            LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
+                setMargins(dp(3f), dp(3f), dp(3f), dp(3f))
+            })
 
         section("i play")
         box.addView(seg(listOf("white" to "white", "black" to "black"), if (cfg.iAmWhite) "white" else "black") { v ->

@@ -30,6 +30,22 @@ class Tracker(var iAmWhite: Boolean, private val myTurnAtStart: Boolean) {
     var lastTypeMismatch = 0
         private set
 
+    /**
+     * a record of the game for the review screen: the position it starts from and the moves played since (like e2e4).
+     * it starts over when the board has to be read again from scratch. logVersion goes up when it changes
+     */
+    var startFen: String = ""
+        private set
+    val playedMoves = ArrayList<String>()
+    var logVersion = 0
+        private set
+
+    private fun restartLog(b: Board) {
+        startFen = b.fen
+        playedMoves.clear()
+        logVersion++
+    }
+
     private var misses = 0
     private var missSince = 0L
     private var missScreen: IntArray? = null
@@ -70,6 +86,7 @@ class Tracker(var iAmWhite: Boolean, private val myTurnAtStart: Boolean) {
             if (Game.mismatch(occ, Game.startOcc()) <= 1) {
                 val b = Board() // standard starting position, white to move
                 board = b
+                restartLog(b)
                 needsVerify = false
                 suspicious = 0
                 clearMisses()
@@ -116,7 +133,12 @@ class Tracker(var iAmWhite: Boolean, private val myTurnAtStart: Boolean) {
         if (System.getProperty("tdebug") != null) println("        [trk] known=${known.fen} mis0=${Game.mismatch(Game.occOf(known), occ)} -> other=$bestOther d=$bestD cost=$bestCost mis=${hit?.mis} path=${hit?.path}")
         if (hit != null) {
             val target = if (bestOther) other else known
+            if (bestOther) restartLog(target) // we had the wrong side to move: the record starts here
             Game.play(target, hit)
+            if (hit.path.isNotEmpty()) {
+                for (m in hit.path) playedMoves.add(m.toString())
+                logVersion++
+            }
             board = target
             clearMisses()
             lastPlies = bestD
@@ -171,6 +193,7 @@ class Tracker(var iAmWhite: Boolean, private val myTurnAtStart: Boolean) {
         if (!Game.isValidPlacement(placement)) return false
         val whiteToMove = Game.turnFromChecks(placement) ?: iAmWhite // no hint: assume it is our turn
         board = Game.newBoard(placement, whiteToMove)
+        board?.let { restartLog(it) }
         needsVerify = false
         suspicious = 0
         clearMisses()
@@ -200,6 +223,7 @@ class Tracker(var iAmWhite: Boolean, private val myTurnAtStart: Boolean) {
         if (!Game.isValidPlacement(placement)) return false
         val nb = Game.newBoard(placement, b.sideToMove == Side.WHITE)
         board = nb
+        restartLog(nb)
         needsVerify = false
         suspicious = 0
         if (reads != null) learnFrom(nb, wb, screen, reads, all = true)
@@ -219,6 +243,7 @@ class Tracker(var iAmWhite: Boolean, private val myTurnAtStart: Boolean) {
         val whiteToMove = if (myTurnAtStart) iAmWhite else !iAmWhite
         val nb = Game.newBoard(placement, whiteToMove)
         board = nb
+        restartLog(nb)
         whiteBottom = wb
         clearMisses()
         suspicious = 0
