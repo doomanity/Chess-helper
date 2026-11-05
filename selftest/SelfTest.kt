@@ -330,6 +330,62 @@ fun special(sf: UciEngine?) {
     run("knight promotion flipped", false, "a2a4 b7b5 a4b5 a7a6 b5a6 c8b7 a6b7 b8c6 b7a8n")
 }
 
+/**
+ * a promotion read at a bad moment: the frame right after the move shows a queen (the piece picker or the animation),
+ * but the pawn really became a knight. the next reads show the knight and the tracker must fix the piece by itself
+ * (no AI), and the move in the game record must say knight too. also: the knight then moves like a knight
+ */
+fun promoRecheck() {
+    println("== promotion read again")
+    for (white in listOf(true, false)) {
+        val sc = Scene(looks[0], 1189, 2576, 78, 918, 1032, white, Random(11))
+        val truth = Board(); val tr = Tracker(white, true); val ph = Phone(tr, sc)
+        ph.look(render(sc, truth, null, null))
+        for (u in "a2a4 b7b5 a4b5 a7a6 b5a6 c8b7 a6b7 b8c6".split(" ")) {
+            val mv = playMove(truth, u)
+            ph.look(render(sc, truth, mv.from.ordinal, mv.to.ordinal))
+        }
+        // what the screen shows for a moment: a queen on a8
+        val fake = boardOf(truth.fen); playMove(fake, "b7a8q")
+        val mv = playMove(truth, "b7a8n")
+        ph.look(render(sc, fake, mv.from.ordinal, mv.to.ordinal))
+        val firstGuess = tr.board?.let { Game.placement(it) }
+        // then the real piece shows up
+        ph.look(render(sc, truth, mv.from.ordinal, mv.to.ordinal))
+        ph.look(render(sc, truth, mv.from.ordinal, mv.to.ordinal))
+        check(samePosition(tr, truth), "promotion recheck (white=$white): first read ${firstGuess}\n    truth   ${truth.fen}\n    tracker ${tr.board?.fen}")
+        check(tr.playedMoves.lastOrNull() == "b7a8n", "promotion recheck (white=$white): record says ${tr.playedMoves.lastOrNull()}")
+        // the game goes on: black moves, then the knight jumps
+        for (u in "g8f6 a8c7".split(" ")) {
+            val m2 = playMove(truth, u)
+            ph.look(render(sc, truth, m2.from.ordinal, m2.to.ordinal))
+            check(samePosition(tr, truth), "after the fixed promotion (white=$white), $u\n    truth   ${truth.fen}\n    tracker ${tr.board?.fen}")
+        }
+        println("  ${if (white) "white" else "black"} at the bottom: first read ${if (firstGuess == Game.placement(fake)) "queen (wrong, as planned)" else "knight"} -> fixed ok")
+    }
+}
+
+/** the lost-track case: the misread queen moves like a knight before we had a second look */
+fun promoLost() {
+    println("== misread promotion, then the piece moves")
+    val sc = Scene(looks[0], 1189, 2576, 78, 918, 1032, true, Random(12))
+    val truth = Board(); val tr = Tracker(true, true); val ph = Phone(tr, sc)
+    ph.look(render(sc, truth, null, null))
+    for (u in "a2a4 b7b5 a4b5 a7a6 b5a6 c8b7 a6b7 b8c6".split(" ")) {
+        val mv = playMove(truth, u)
+        ph.look(render(sc, truth, mv.from.ordinal, mv.to.ordinal))
+    }
+    val fake = boardOf(truth.fen); playMove(fake, "b7a8q")
+    val mv = playMove(truth, "b7a8n")
+    ph.look(render(sc, fake, mv.from.ordinal, mv.to.ordinal))
+    for (u in "g8f6 a8c7".split(" ")) {
+        val m2 = playMove(truth, u)
+        ph.look(render(sc, truth, m2.from.ordinal, m2.to.ordinal))
+    }
+    check(samePosition(tr, truth), "misread promotion then a knight jump\n    truth   ${truth.fen}\n    tracker ${tr.board?.fen}")
+    println("  ok")
+}
+
 /** start in the middle of a game (the AI reads the board), including a wrong guess about whose turn it is */
 fun midGame() {
     println("== starting in the middle of a game")
@@ -479,6 +535,8 @@ fun main(args: Array<String>) {
     sf.configure(UciEngine.MAX_ELO)
     realShots(fixtures)
     special(sf)
+    promoRecheck()
+    promoLost()
     midGame()
     println("== simulated games")
     var seed = 100L

@@ -67,6 +67,21 @@ class ReviewActivity : Activity() {
         prefs = Cfg.prefs(this)
         build()
         if (intent?.getBooleanExtra("live", false) == true) startLive()
+        val hid = intent?.getLongExtra("history_id", 0L) ?: 0L
+        if (hid != 0L) openSaved(hid)
+    }
+
+    /** a game from the match history */
+    private fun openSaved(id: Long) {
+        val g = GameHistory.get(this, id)
+        if (g == null || g.moves.isEmpty()) {
+            toast("that game is gone from the history")
+            return
+        }
+        live = false
+        main.removeCallbacks(poll)
+        board.flipped = !g.meWhite
+        submit(ReviewGame(g.startFen, g.moves), 0)
     }
 
     override fun onResume() {
@@ -195,7 +210,7 @@ class ReviewActivity : Activity() {
             return
         }
         live = true
-        board.flipped = !Cfg.load(this).iAmWhite
+        board.flipped = !GameLog.meWhite(this)
         submit(g, -1)
         main.removeCallbacks(poll)
         main.postDelayed(poll, 1500)

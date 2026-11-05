@@ -7,7 +7,9 @@ import android.content.SharedPreferences
 class Cfg(p: SharedPreferences) {
     val apiKey = (p.getString("api_key", "") ?: "").trim()
     val model = (p.getString("model", "claude-haiku-5-5") ?: "claude-haiku-5-5").trim()
-    val iAmWhite = p.getString("color", "white") == "white"
+    val colorMode = p.getString("color", "auto") ?: "auto"     // auto (the side at the bottom of the board), white, black
+    val autoColor = colorMode == "auto"
+    val iAmWhite = colorMode != "black"
     val myTurnAtStart = p.getBoolean("my_turn", true)
     val elo = p.getInt("elo2", UciEngine.MAX_ELO)
     val useMaia = p.getString("engine", "stockfish") == "maia3"
@@ -48,7 +50,14 @@ class Cfg(p: SharedPreferences) {
     val circleY = p.getFloat("circle_y", 0.3f)
 
     companion object {
-        fun prefs(ctx: Context): SharedPreferences = ctx.getSharedPreferences("cfg", Context.MODE_PRIVATE)
+        fun prefs(ctx: Context): SharedPreferences {
+            val p = ctx.getSharedPreferences("cfg", Context.MODE_PRIVATE)
+            // version 1.2 picks your side by itself: switch everybody to auto once (they can pick a side again)
+            if (!p.getBoolean("color_auto_v12", false)) {
+                p.edit().putString("color", "auto").putBoolean("color_auto_v12", true).apply()
+            }
+            return p
+        }
         fun load(ctx: Context) = Cfg(prefs(ctx))
 
         /** keys that only change the look: no need to think again when they change */

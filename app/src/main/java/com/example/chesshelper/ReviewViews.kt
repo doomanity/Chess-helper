@@ -183,52 +183,22 @@ class ReviewBoardView(ctx: Context) : View(ctx) {
             val top = sr * sq
             if (lab.glows) animating = enchant(canvas, lab, grid[trow][tcol], left, top, sq)
             badge(canvas, lab, left + sq, top, sq)
+            if (lab.glows) {
+                val r = sq * 0.25f
+                Enchant.badgeShine(canvas, left + sq - r * 0.8f, top + r * 0.8f, r, lab, (SystemClock.uptimeMillis() - startedAt) / 1000f)
+            }
         }
         canvas.restore()
         if (animating) postInvalidateOnAnimation()
     }
 
-    /** the glow on the piece that made a brilliant (bright blue) or great (deep blue) move. true while it is still moving */
+    /** the minecraft style enchant on the piece that made a brilliant or great move. keeps a calm glint going */
     private fun enchant(c: Canvas, lab: Label, piece: Char, left: Float, top: Float, sq: Float): Boolean {
         val t = (SystemClock.uptimeMillis() - startedAt) / 1000f
-        val bright = if (lab == Label.BRILLIANT) Color.rgb(0, 229, 255) else Color.rgb(68, 98, 255)
-        val deep = if (lab == Label.BRILLIANT) Color.rgb(30, 110, 255) else Color.rgb(24, 32, 150)
-        val fade = if (t < 2.6f) 1f else max(0.4f, 1f - (t - 2.6f) / 0.8f)
-        val pulse = if (t < 3.4f) 0.6f + 0.4f * sin(t * 5.5f) else 0.6f
         val cx = left + sq / 2f
         val cy = top + sq / 2f
-
-        // a soft glow around the square
-        glow.shader = RadialGradient(cx, cy, sq * 0.95f, intArrayOf(alpha(bright, (170 * pulse * fade).toInt()), alpha(bright, 0)), null, Shader.TileMode.CLAMP)
-        c.drawCircle(cx, cy, sq * 0.95f, glow)
-        glow.shader = null
-
-        if (piece != '.') {
-            // the piece gets a blue tint, and a bright band sweeps over it from corner to corner
-            fill.color = alpha(deep, (120 * pulse * fade).toInt())
-            drawPiece(c, piece, cx, cy, sq, fill)
-            val sweep = (t * 0.85f) % 1.4f
-            val x0 = left - sq * 0.5f + sweep * sq * 1.7f
-            val band = Paint(Paint.ANTI_ALIAS_FLAG)
-            band.shader = LinearGradient(
-                x0, top, x0 + sq * 0.5f, top + sq * 0.5f,
-                intArrayOf(alpha(bright, 0), alpha(Color.WHITE, (235 * fade).toInt()), alpha(bright, 0)),
-                floatArrayOf(0f, 0.5f, 1f), Shader.TileMode.CLAMP
-            )
-            drawPiece(c, piece, cx, cy, sq, band)
-        }
-
-        // little squares floating up, like the particles around an enchanting table
-        for (k in 0 until 9) {
-            val ph = (t * 0.55f + k * 0.113f) % 1f
-            val px = cx + sin(k * 2.4f + t * 1.7f) * sq * 0.5f
-            val py = top + sq * 1.05f - ph * sq * 1.5f
-            val a = (1f - ph) * fade
-            val s = sq * 0.065f * (1f - ph * 0.5f)
-            fill.color = alpha(if (k % 2 == 0) bright else Color.WHITE, (235 * a).toInt())
-            c.drawRect(px - s, py - s, px + s, py + s, fill)
-        }
-        return t < 3.4f
+        val draw: ((Paint) -> Unit)? = if (piece == '.') null else { p -> drawPiece(c, piece, cx, cy, sq, p) }
+        return Enchant.draw(c, RectF(left, top, left + sq, top + sq), lab, t, draw, loop = true)
     }
 
     /** the round badge in the corner of the square the piece went to */

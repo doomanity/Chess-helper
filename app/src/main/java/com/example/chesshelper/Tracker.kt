@@ -12,6 +12,14 @@ import com.github.bhlangonijr.chesslib.Side
 class Tracker(var iAmWhite: Boolean, private val myTurnAtStart: Boolean) {
     enum class Step { NEED_AI, STARTED, NO_CHANGE, MOVED, UNREADABLE, RESYNC, RESET }
 
+    /** auto color: your side is the one at the bottom of the screen (every chess app shows your pieces there) */
+    var autoColor = false
+
+    /** which side is yours: the bottom side in auto mode, else the setting */
+    fun meWhite(): Boolean = if (autoColor) (whiteBottom ?: iAmWhite) else iAmWhite
+
+    private fun me(wb: Boolean): Boolean = if (autoColor) wb else iAmWhite
+
     /** what the pieces of this chess app look like, learned from a position we are sure about */
     val templates = PieceTemplates()
 
@@ -40,11 +48,29 @@ class Tracker(var iAmWhite: Boolean, private val myTurnAtStart: Boolean) {
     var logVersion = 0
         private set
 
+    /** goes up every time the record starts over (a new game, or the board had to be read again) */
+    var logEpoch = 0
+        private set
+
     private fun restartLog(b: Board) {
         startFen = b.fen
         playedMoves.clear()
         logVersion++
+        logEpoch++
+        promo.clear()
     }
+
+    /**
+     * pieces that came from a promotion, and how sure we are of their type. right after a promotion the screen is
+     * often still animating (or the piece picker is closing), so the piece can be misread. we keep checking what we
+     * see on that square for the next reads and fix the piece if it clearly is something else.
+     * chess square index -> [which entry of playedMoves made it, times it looked different, times it looked right]
+     */
+    private val promo = HashMap<Int, IntArray>()
+    private var retrying = false
+
+    /** true while a promoted piece still needs a few more looks (the service reads the board again soon) */
+    val promoUnsure: Boolean get() = promo.values.any { it[2] < 2 }
 
     private var misses = 0
     private var missSince = 0L
@@ -55,6 +81,48 @@ class Tracker(var iAmWhite: Boolean, private val myTurnAtStart: Boolean) {
         const val MAX_PLY = 3
         const val LOST_MS = 2500L   // how long a position we can't explain has to stay on screen before we start over
         const val SUSPECT = 3       // this many piece types that look wrong means our board is probably wrong
+    }
+
+    /** a promoted piece moved (keep watching it on its new square) or was taken (stop) */
+    private fun followPromo(from: Int, to: Int) {
+        promo.remove(to)
+        promo.remove(from)?.let { promo[to] = it }
+    }
+
+    /**
+     * looks at the promoted pieces again. two reads in a row that clearly show another piece (knight, bishop, rook
+     * or queen of the same color) fix it, and the move in the record gets the right piece too
+     */
+    private fun checkPromoted(b: Board, seenChess: IntArray) {
+        if (promo.isEmpty()) return
+        val done = ArrayList<Int>()
+        for ((sq, st) in promo.entries.map { Pair(it.key, it.value) }) {
+            val piece = b.getPiece(com.github.bhlangonijr.chesslib.Square.squareAt(sq))
+            val have = Game.typeCode(piece)
+            if (have !in 2..5) { done.add(sq); continue } // not a promoted piece any more
+            val seen = seenChess[sq]
+            when {
+                seen == have -> { st[2]++; st[1] = 0 }
+                seen in 2..5 -> st[1]++
+                else -> {} // can't tell (covered): no vote
+            }
+            if (st[1] >= 2) {
+                val fixed = Game.withPieceType(b.fen, sq, seen) ?: continue
+                val nb = Board()
+                nb.loadFromFen(fixed)
+                board = nb
+                val idx = st[0]
+                if (idx in playedMoves.indices && playedMoves[idx].length == 5) {
+                    playedMoves[idx] = playedMoves[idx].substring(0, 4) + "?nbrq"[seen - 1]
+                    logVersion++
+                }
+                st[1] = 0
+                st[2] = 1
+                return // the board object changed, look again next time
+            }
+            if (st[2] >= 3) done.add(sq) // seen right a few times: sure now
+        }
+        for (sq in done) promo.remove(sq)
     }
 
     /** forget the game, the next update asks for a fresh read. (what the pieces look like is kept) */
@@ -136,7 +204,11 @@ class Tracker(var iAmWhite: Boolean, private val myTurnAtStart: Boolean) {
             if (bestOther) restartLog(target) // we had the wrong side to move: the record starts here
             Game.play(target, hit)
             if (hit.path.isNotEmpty()) {
-                for (m in hit.path) playedMoves.add(m.toString())
+                for (m in hit.path) {
+                    followPromo(m.from.ordinal, m.to.ordinal)
+                    playedMoves.add(m.toString())
+                    if (m.promotion != com.github.bhlangonijr.chesslib.Piece.NONE) promo[m.to.ordinal] = intArrayOf(playedMoves.size - 1, 0, 0)
+                }
                 logVersion++
             }
             board = target
@@ -146,17 +218,52 @@ class Tracker(var iAmWhite: Boolean, private val myTurnAtStart: Boolean) {
                 // with the piece shapes known we already picked the piece that fits what we see
                 needsVerify = !templates.complete
             }
+            if (seenChess != null) checkPromoted(target, seenChess)
             if (seenChess != null && reads != null) {
-                val mis = Game.typeMismatch(target, seenChess)
+                val mis = Game.typeMismatch(board!!, seenChess)
                 lastTypeMismatch = mis
                 suspicious = if (mis >= SUSPECT) suspicious + 1 else 0
                 if (suspicious >= 3 && resyncFromVision(screen, seen!!, reads, wb)) return Step.RESET
-                if (mis == 0 && !templates.complete) learnFrom(target, wb, screen, reads, all = false)
+                if (mis == 0 && !templates.complete) learnFrom(board!!, wb, screen, reads, all = false)
             }
             return if (bestD == 0) Step.NO_CHANGE else Step.MOVED
         }
 
-        // we can't explain what we see
+        // we can't explain what we see. a misread promoted piece is a common reason (a "queen" that just moved like
+        // a knight). try the promoted pieces as the other types: the piece the screen shows there first, then any
+        // type that explains the new position. if one fits, fix the piece and read this screen again
+        if (!retrying && promo.isNotEmpty()) {
+            for ((sq, st) in promo.entries.map { Pair(it.key, it.value) }) {
+                val have = Game.typeCode(known.getPiece(com.github.bhlangonijr.chesslib.Square.squareAt(sq)))
+                if (have !in 2..5) continue
+                val seenT = seenChess?.get(sq) ?: 0
+                val order = (listOf(seenT) + listOf(5, 2, 4, 3)).filter { it in 2..5 && it != have }.distinct()
+                for (t in order) {
+                    val fixed = Game.withPieceType(known.fen, sq, t) ?: continue
+                    val nb = Board()
+                    nb.loadFromFen(fixed)
+                    val fits = t == seenT || (1..MAX_PLY).any { d -> Game.hitsAt(nb, occ, d).any { it.mis == 0 } }
+                    if (!fits) continue
+                    board = nb
+                    val idx = st[0]
+                    if (idx in playedMoves.indices && playedMoves[idx].length == 5) {
+                        playedMoves[idx] = playedMoves[idx].substring(0, 4) + "?nbrq"[t - 1]
+                        logVersion++
+                    }
+                    retrying = true
+                    try {
+                        val again = update(screen, reads, nowMs)
+                        if (again != Step.UNREADABLE && again != Step.RESYNC) return again
+                    } finally {
+                        retrying = false
+                    }
+                    board = known // that didn't help: put it back
+                    if (idx in playedMoves.indices && playedMoves[idx].length == 5) {
+                        playedMoves[idx] = playedMoves[idx].substring(0, 4) + "?nbrq"[have - 1]
+                    }
+                }
+            }
+        }
         val ms = missScreen
         if (ms == null || Game.mismatch(ms, screen) > 0) {
             missScreen = screen.copyOf()
@@ -191,7 +298,7 @@ class Tracker(var iAmWhite: Boolean, private val myTurnAtStart: Boolean) {
         }
         val placement = Game.placementFromTypes(Game.screenToChess(screen, wb), Game.screenToChess(types, wb))
         if (!Game.isValidPlacement(placement)) return false
-        val whiteToMove = Game.turnFromChecks(placement) ?: iAmWhite // no hint: assume it is our turn
+        val whiteToMove = Game.turnFromChecks(placement) ?: me(wb) // no hint: assume it is our turn
         board = Game.newBoard(placement, whiteToMove)
         board?.let { restartLog(it) }
         needsVerify = false
@@ -240,7 +347,8 @@ class Tracker(var iAmWhite: Boolean, private val myTurnAtStart: Boolean) {
         val wb = BoardVision.whiteBottomOf(gridScreen) ?: claimWhiteBottom ?: iAmWhite
         val placement = Game.placementFromGrid(grid, wb)
         if (!Game.isValidPlacement(placement)) return false
-        val whiteToMove = if (myTurnAtStart) iAmWhite else !iAmWhite
+        val mine = me(wb)
+        val whiteToMove = if (myTurnAtStart) mine else !mine
         val nb = Game.newBoard(placement, whiteToMove)
         board = nb
         restartLog(nb)

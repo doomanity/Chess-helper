@@ -21,6 +21,22 @@ class RemoteEngine(
     fun opponentMove(fen: String, botElo: Int): String? =
         movesFor(fen, 1, botElo, elo, 0f, "bot").firstOrNull()
 
+    /**
+     * the bot's n most likely moves (maia3 playing as the bot), most likely first, with maia3's odds (0..1) when the
+     * pc server sends them (an older server doesn't: the odds are null then)
+     */
+    fun opponentGuesses(fen: String, botElo: Int, n: Int): List<Pair<String, Float?>> {
+        val json = post(fen, n, botElo, elo, 0f, "bot")
+        val arr = json.optJSONArray("moves") ?: return emptyList()
+        val probs = json.optJSONArray("probs")
+        val out = ArrayList<Pair<String, Float?>>()
+        for (i in 0 until arr.length()) {
+            val p = if (probs != null && i < probs.length()) probs.optDouble(i, -1.0).takeIf { it >= 0.0 }?.toFloat() else null
+            out.add(Pair(arr.getString(i), p))
+        }
+        return out
+    }
+
     private fun movesFor(fen: String, n: Int, self: Int, oppo: Int, temp: Float, who: String): List<String> {
         val json = post(fen, n, self, oppo, temp, who)
         val arr = json.optJSONArray("moves")

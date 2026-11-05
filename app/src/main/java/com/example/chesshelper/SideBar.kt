@@ -437,7 +437,7 @@ class SideBar(private val ctx: Context, private val wm: WindowManager, private v
         box.addView(row2)
 
         var g = ui.group(box, "game")
-        g.add(ui.segRow("i play", listOf("white" to "white", "black" to "black"), if (cfg.iAmWhite) "white" else "black") { v ->
+        g.add(ui.segRow("i play", listOf("auto" to "auto", "white" to "white", "black" to "black"), cfg.colorMode) { v ->
             save { it.putString("color", v) }
         })
         g.add(ui.segRow("engine", listOf("stockfish" to "stockfish", "maia3" to "maia3 (pc)"), if (cfg.useMaia) "maia3" else "stockfish") { v ->

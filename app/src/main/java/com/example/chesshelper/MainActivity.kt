@@ -58,8 +58,8 @@ class MainActivity : Activity() {
         })
 
         // ---- game
-        g = ui.group(root, "game")
-        g.add(ui.segRow("i play", listOf("white" to "white", "black" to "black"), if (c.iAmWhite) "white" else "black") { v -> save { it.putString("color", v) } })
+        g = ui.group(root, "game", "auto: your side is the one at the bottom of the board, so it works on any app with no switching")
+        g.add(ui.segRow("i play", listOf("auto" to "auto", "white" to "white", "black" to "black"), c.colorMode) { v -> save { it.putString("color", v) } })
         g.add(ui.toggleRow("my turn when i press start", c.myTurnAtStart) { on -> save { it.putBoolean("my_turn", on) } })
 
         // ---- engine
@@ -129,6 +129,7 @@ class MainActivity : Activity() {
         // ---- game review
         g = ui.group(root, "game review", "labels every move like chess.com for the game you just played or any pasted pgn. analysis only, it never picks a move")
         g.add(ui.navRow("open game review", tint = ui.blue) { startActivity(Intent(this, ReviewActivity::class.java)) })
+        g.add(ui.navRow("match history", "${GameHistory.all(this).size} games", tint = ui.blue) { startActivity(Intent(this, HistoryActivity::class.java)) })
 
         // ---- claude
         g = ui.group(root, "claude", "only used once when you start in the middle of a game")

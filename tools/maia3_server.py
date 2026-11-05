@@ -13,6 +13,8 @@ run:
 
 it prints the address to type into the app (like 192.168.1.20:8765).
 the app sends the position and the rating you picked, this script answers with maia3's move.
+it also says how likely each move is (maia3's own odds), so the app can show "Nf6 52%" for the bot's guesses.
+for that it runs maia3 inside this script. if that doesn't work it falls back to the maia3-uci program (no odds then).
 """
 import argparse
 import json
@@ -75,12 +77,52 @@ class Uci:
             moves.remove(best)
         return best, ([best] + moves)[:n]
 
+    def sync(self):
+        self.send("isready")
+        self.wait("readyok")
+
     def close(self):
         try:
             self.send("quit")
             self.proc.terminate()
         except Exception:
             pass
+
+
+class Direct:
+    """maia3 run inside this script instead of as a uci program: the same model, but we also get the odds of
+    every move (maia3's uci output doesn't print them)"""
+
+    def __init__(self, m3, model, elo, device):
+        argv = ["--model", model, "--elo", str(elo), "--device", device, "--use-uci-history"]
+        if device == "cpu":
+            argv.append("--no-use-amp")
+        self.eng = m3.Maia3UCIEngine(m3.parse_args(argv))
+        self.eng.ensure_model_loaded()
+
+    def option(self, name, value):
+        self.eng.cmd_setoption(f"setoption name {name} value {value}")
+
+    def sync(self):
+        pass
+
+    def best(self, fen, n=1):
+        """like Uci.best, plus the odds (0..1) of each listed move"""
+        self.eng.multipv = max(1, min(20, max(n, 3)))
+        self.eng.cmd_position("position fen " + fen)
+        move, top = self.eng.score_moves()
+        if move is None:
+            raise RuntimeError("no legal move in this position")
+        odds = {t["move"].uci(): float(t["policy"]) for t in top}
+        ranked = [t["move"].uci() for t in top]
+        best = move.uci()
+        if best in ranked:
+            ranked.remove(best)
+        moves = ([best] + ranked)[:n]
+        return best, moves, [round(odds.get(m, 0.0), 4) for m in moves]
+
+    def close(self):
+        pass
 
 
 class Pool:
@@ -116,7 +158,16 @@ class Pool:
                 if self.engine:
                     self.engine.close()
                 print(f"starting engine: model {model} (the first start loads the model, be patient)")
-                self.engine = Uci(self.command(model, elo))
+                self.engine = None
+                if not self.args.cmd and not self.args.uci:
+                    try:
+                        from maia3 import uci as m3
+                        self.engine = Direct(m3, model, elo, self.args.device)
+                        print("maia3 runs inside the server: move odds on")
+                    except Exception as e:
+                        print(f"couldn't run maia3 inside the server ({e}), using the maia3-uci program (no move odds)")
+                if self.engine is None:
+                    self.engine = Uci(self.command(model, elo))
                 self.opts = {}
                 self.key = model
             # temperature 0 = always maia's most likely move (strongest). around 1 = it picks like a real human,
@@ -126,10 +177,10 @@ class Pool:
             changed |= self.set("SelfElo", elo)
             changed |= self.set("OppoElo", oppo or self.args.oppo_elo or elo)
             if changed:
-                self.engine.send("isready")
-                self.engine.wait("readyok")
+                self.engine.sync()
             try:
-                return self.engine.best(fen, n)
+                found = self.engine.best(fen, n)
+                return found if len(found) == 3 else (found[0], found[1], None)
             except Exception:
                 self.key = None  # the engine died (bad position?), start a fresh one next time
                 raise
@@ -170,10 +221,14 @@ def make_handler(pool, default_model, default_elo):
                 oppo = int(req.get("oppo_elo") or 0) or None
                 temp = req.get("temperature")
                 temp = None if temp is None else round(max(0.0, min(2.0, float(temp))), 2)
-                mv, moves = pool.move(fen, model, elo, n, oppo, temp)
+                mv, moves, odds = pool.move(fen, model, elo, n, oppo, temp)
                 who = req.get("for") or "you"
-                print(f"[{who} {elo}] {fen}  ->  {' '.join(moves)}")
-                self.reply(200, {"move": mv, "moves": moves})
+                shown = moves if odds is None else [f"{m} {round(p * 100)}%" for m, p in zip(moves, odds)]
+                print(f"[{who} {elo}] {fen}  ->  {'  '.join(shown)}")
+                out = {"move": mv, "moves": moves}
+                if odds is not None:
+                    out["probs"] = odds
+                self.reply(200, out)
             except Exception as e:
                 print("error:", e)
                 self.reply(500, {"error": str(e)})
@@ -193,6 +248,7 @@ def main():
     ap.add_argument("--temperature", default="0", help="0 = always the most likely move (strongest). 1 = human-like randomness")
     ap.add_argument("--oppo-elo", type=int, default=0, help="rating of the opponent bot you play, 0 = same as your maia rating")
     ap.add_argument("--cmd", default=None, help="advanced: run another uci engine instead, {model} and {elo} get filled in")
+    ap.add_argument("--uci", action="store_true", help="use the maia3-uci program instead of running maia3 inside (no move odds)")
     args = ap.parse_args()
     pool = Pool(args)
     srv = ThreadingHTTPServer(("0.0.0.0", args.port), make_handler(pool, args.model, args.elo))

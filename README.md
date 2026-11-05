@@ -14,7 +14,7 @@ github builds it for you. open the Actions tab and wait for the build (about 5 t
 
 ## use it
 
-1. open the app, paste your claude api key, pick your side and difficulty
+1. open the app, paste your claude api key and pick the difficulty. your side is "auto" by default: the side at the bottom of the board is yours, so switching colors between games needs nothing
 2. tap "1. allow draw over other apps" and turn it on
 3. tap "2. start" and allow screen capture
 4. open your chess app. after a few seconds it shows 1 to 4 moves (you pick how many in the app) as arrows with a small list: dark green = best, light green = decent, yellow = acceptable, red with a skull = blunder. the numbers are stockfish's evaluation at full power, for both engines
@@ -22,10 +22,11 @@ github builds it for you. open the Actions tab and wait for the build (about 5 t
 
 ## extras
 
-- **guess the bot's move**: while the bot thinks, a faint dashed arrow with a "?" shows its likely move (maia3 at the bot's rating if you use maia3, else stockfish). your answer to that move is worked out early, so if the guess is right your moves show up at once ("ready early" on the card)
+- **guess the bot's move**: while the bot thinks, faint dashed arrows show its 3 most likely moves (maia3 at the bot's rating if you use maia3, else stockfish's best moves). with maia3 each one shows maia3's odds, like "Nf6 52%" (update `tools/maia3_server.py` on your pc and restart it to get the odds). your answer to each guess is worked out early, so if the bot plays one of them your moves show up at once ("ready early" on the card)
 - **live accuracy**: "you 87% · bot 72%" on the card, lichess style. each move is scored by how much it dropped the mover's winning chances. moves the app missed (two moves at once) are skipped
 - **move labels**: every move that was just played (yours and the bot's) gets a small badge on the square it went to: brilliant, great, best, excellent, good, book, inaccuracy, mistake, miss or blunder. brilliant and great glow blue with a shimmer. it is analysis only and never changes which moves are suggested. each label costs about half a second of stockfish. the "move labels" switch turns it off, and the rating used to judge comes from the review screen
-- **premove**: while the bot thinks, your answer to the move the helper guesses (maia3's top pick when maia3 is on) is drawn next to the guess as a dashed arrow with a "P". if the bot plays the guess, your real suggestion shows at once. if it plays something else, the premove just goes away. the "premove" switch turns it off
+- **premove**: the card lists your answer to each of the 3 guesses ("you: e5"), and the answer to the most likely one is drawn on the board as a dashed arrow with a "P". if the bot plays a guess, your real suggestion shows at once. the "premove" switch turns it off
+- **match history**: every game the helper follows is saved by itself: result, your side, accuracy, opening, date. open it from the app ("match history"). tap a game to review it. the board only shows checkmate and stalemate, so hold a game to set the result yourself after a resign or a loss on time (or to delete it)
 - **pause**: hides everything and stops reading the screen until you resume
 
 ## game review
@@ -46,9 +47,14 @@ labels: brilliant `!!`, great `!`, best, excellent, good, book, inaccuracy `?!`,
 - **miss** = a small slip right after the opponent messed up, when there was something to take
 - the rating picker (600 to 2500) bends the curve like chess.com does: lower ratings are judged more kindly. brilliant, great and miss have no published formula, so they are close copies of how chess.com describes them, not exact
 
-a brilliant or great move glows on the board (bright blue and deep blue, with a shimmer over the piece and little squares floating up). there is also an accuracy score for both sides, a count of every label, an eval graph (tap or drag it to jump to a move) and a list of all the moves. "depth" picks how long stockfish thinks per position (fast / normal / deep).
+a brilliant or great move gets a minecraft style enchant on the board: a shock ring when it lands, the enchanted item glint sliding over the piece, enchanting table runes floating up and little sparkles (teal for brilliant, blue and violet for great). there is also an accuracy score for both sides, a count of every label, an eval graph (tap or drag it to jump to a move) and a list of all the moves. "depth" picks how long stockfish thinks per position (fast / normal / deep).
 
 the opening book is `app/src/main/assets/openings.tsv`. rebuild it with `tools/build_openings.py` (see the top of that file).
+
+## reading the board
+
+- if you (or the bot) move while the helper is still drawing, it notices and reads the board again right away, so the suggestions don't get stuck on the bot's turn
+- a promoted piece is looked at a few more times after the promotion (the first look can catch the piece picker or the animation). if it was misread, it is fixed by itself, also when the piece already moved
 
 ## look
 

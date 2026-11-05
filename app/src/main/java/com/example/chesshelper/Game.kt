@@ -99,6 +99,29 @@ object Game {
     }
 
     /** the part of a fen that says what the position is (pieces, side to move, castling, en passant) */
+    /**
+     * the same fen with the piece on square sq (0 = a1 .. 63 = h8) changed to another type (2 knight, 3 bishop,
+     * 4 rook, 5 queen), same color. null if there is no piece there
+     */
+    fun withPieceType(fen: String, sq: Int, type: Int): String? {
+        val parts = fen.split(" ")
+        val rows = parts[0].split("/").map { r ->
+            val sb = StringBuilder()
+            for (ch in r) if (ch.isDigit()) repeat(ch - '0') { sb.append('.') } else sb.append(ch)
+            sb
+        }
+        if (rows.size != 8) return null
+        val row = rows[7 - sq / 8]
+        val file = sq % 8
+        if (file >= row.length) return null
+        val old = row[file]
+        if (old == '.') return null
+        val ch = " pnbrqk"[type]
+        row.setCharAt(file, if (old.isUpperCase()) ch.uppercaseChar() else ch)
+        val placement = rows.joinToString("/") { compress(it.toString()) }
+        return (listOf(placement) + parts.drop(1)).joinToString(" ")
+    }
+
     fun posKey(fen: String): String = fen.split(" ").take(4).joinToString(" ")
 
     fun placement(b: Board): String = b.fen.substringBefore(' ')

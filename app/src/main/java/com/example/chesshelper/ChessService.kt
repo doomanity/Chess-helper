@@ -24,6 +24,7 @@ import android.os.SystemClock
 import android.view.Gravity
 import android.view.WindowManager
 import android.widget.Toast
+import com.github.bhlangonijr.chesslib.Board
 import com.github.bhlangonijr.chesslib.Side
 import java.io.File
 
@@ -104,9 +105,20 @@ class ChessService : Service(), SideBarHost, SharedPreferences.OnSharedPreferenc
     @Volatile private var badgeNearUntil = 0L
     private var badgeIdx = -1                                    // the screen square the badge sits on
 
+    // reading the board again: after a promotion (the piece is checked a few more times), and when the board
+    // changed while we were busy drawing (the bot moved fast)
+    @Volatile private var recheckAt = 0L
+    private var promoLooks = 0
+    private var forcedReads = 0
+
+    // the match history: which game the record belongs to
+    private var histEpoch = -1
+    private var histId = 0L
+
     private enum class Mode { NORMAL, RETHINK, SAVE }
 
     override fun onBind(intent: Intent?): IBinder? = null
+
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (intent?.action == "STOP") {
@@ -283,6 +295,7 @@ class ChessService : Service(), SideBarHost, SharedPreferences.OnSharedPreferenc
         predShownKey = null
         advisor = Advisor(sf, remote)
         tracker?.iAmWhite = c.iAmWhite
+        tracker?.autoColor = c.autoColor
         shownFen = null
         wantRead = true
     }
@@ -365,6 +378,7 @@ class ChessService : Service(), SideBarHost, SharedPreferences.OnSharedPreferenc
         }
         review = LiveReview(stockfish ?: return, book)
         val tr = Tracker(c0.iAmWhite, c0.myTurnAtStart)
+        tr.autoColor = c0.autoColor
         tracker = tr
 
         var moving = false
@@ -404,6 +418,10 @@ class ChessService : Service(), SideBarHost, SharedPreferences.OnSharedPreferenc
                     }
 
                     val now = SystemClock.elapsedRealtime()
+                    if (recheckAt in 1..now) {
+                        recheckAt = 0L
+                        wantRead = true
+                    }
                     val f = look()
                     if (f == null) {
                         if (lostBoardSince == 0L) lostBoardSince = now
@@ -550,10 +568,20 @@ class ChessService : Service(), SideBarHost, SharedPreferences.OnSharedPreferenc
         debugLine(tracker, step)
         val b = tracker.board ?: return step
         if (tracker.logVersion != savedLogVersion) {
-            // keep a record of the game so the review screen can open it
+            // keep a record of the game so the review screen can open it, and in the match history
             savedLogVersion = tracker.logVersion
-            GameLog.save(this, tracker.startFen, tracker.playedMoves)
+            GameLog.save(this, tracker.startFen, tracker.playedMoves, tracker.meWhite())
+            saveHistory(tracker, b)
         }
+        // a promoted piece is checked again on the next few reads (the first look can catch the piece picker
+        // or the animation), so ask for a fresh read soon even if the screen stays still
+        if (tracker.promoUnsure && promoLooks < 4) {
+            promoLooks++
+            recheckAt = SystemClock.elapsedRealtime() + 600
+        } else if (!tracker.promoUnsure) {
+            promoLooks = 0
+        }
+        if (step == Tracker.Step.MOVED || step == Tracker.Step.STARTED || step == Tracker.Step.RESET) forcedReads = 0
         val wb = tracker.whiteBottom ?: c.iAmWhite
         val fen = b.fen
         val key = Game.posKey(fen)
@@ -582,7 +610,7 @@ class ChessService : Service(), SideBarHost, SharedPreferences.OnSharedPreferenc
             lastFen = fen
         }
         val g = f.abs
-        val myTurn = (b.sideToMove == Side.WHITE) == c.iAmWhite
+        val myTurn = (b.sideToMove == Side.WHITE) == tracker.meWhite()
         if (!myTurn) {
             if (mode != Mode.NORMAL) toast("it's the opponent's turn")
             shownFen = null
@@ -686,55 +714,88 @@ class ChessService : Service(), SideBarHost, SharedPreferences.OnSharedPreferenc
             return
         }
 
-        // maia3 playing as the bot is the best guess of what a bot of that rating does, else stockfish's top move
-        var guess: String? = null
+        // the bot's 3 most likely moves: maia3 playing as the bot (with maia3's odds when the pc server sends them),
+        // else stockfish's best moves (no odds then)
+        var raw: List<Pair<String, Float?>> = emptyList()
         val r = remote
         if (r != null) {
             try {
-                guess = r.opponentMove(fen, c.maiaElo)
+                raw = r.opponentGuesses(fen, c.maiaElo, GUESSES)
             } catch (e: java.io.IOException) {
-                // pc not reachable: stockfish's guess below
+                // pc not reachable: stockfish's guesses below
+            } catch (e: org.json.JSONException) {
             }
         }
-        val move = guess?.takeIf { Game.after(fen, it) != null } ?: top.move
-        val after = Game.after(fen, move)
-        val fr = squareRect(g, wb, move.substring(0, 2))
-        val to = squareRect(g, wb, move.substring(2, 4))
-        if (after == null || fr == null || to == null) {
+        if (raw.isEmpty()) {
+            raw = try {
+                sf.analyse(fen, 250, GUESSES).map { Pair<String, Float?>(it.move, null) }
+            } catch (e: IllegalStateException) {
+                listOf(Pair<String, Float?>(top.move, null))
+            }
+        }
+        val gs = ArrayList<Guess>()
+        for ((mv, prob) in raw) {
+            if (gs.size >= GUESSES) break
+            if (gs.any { it.move == mv }) continue
+            val after = Game.after(fen, mv) ?: continue
+            val fr = squareRect(g, wb, mv.substring(0, 2)) ?: continue
+            val to = squareRect(g, wb, mv.substring(2, 4)) ?: continue
+            gs.add(Guess(mv, after, fr, to, Game.san(fen, mv), prob))
+        }
+        if (gs.isEmpty()) {
             runJudge(g, wb, fen, key, c)
             return
         }
         val evalInfo = Advice(emptyList(), evalWhite, top.mate?.let { if (whiteToMove) it else -it }, null, emptyList())
-        val san = Game.san(fen, move)
+        // answers: null = still thinking, "" = not shown (premove off)
+        val answers = arrayOfNulls<String>(gs.size)
+        if (!c.premove) for (i in answers.indices) answers[i] = ""
+        fun draws() = gs.mapIndexed { i, x -> GuessDraw(x.from, x.to, x.san, x.prob, answers[i]) }
         val model = OverlayModel(
             emptyList(), boardRectOf(g), wb,
             evalShare = if (c.showEval) evalInfo.whiteShare else null,
             evalText = if (c.showEval) evalInfo.evalText else null,
             title = "bot's turn",
             accuracy = accText(c),
-            predFrom = fr, predTo = to, predLabel = san
+            guesses = draws()
         )
         predShownKey = key
         predModel = model
         showModel(model)
         runJudge(g, wb, fen, key, c)
 
-        // get our answer ready, unless the bot already moved while we were guessing
-        val afterKey = Game.posKey(after)
-        if (ready.containsKey(afterKey)) return
-        val now = look() ?: return
-        val p = prevThumb
-        if (p != null && BoardVision.changed(p, thumbOf(now))) return
+        // our answer to each guess, most likely first, so it shows up at once if the bot plays one of them.
+        // the less likely ones get a shorter think. stop as soon as the bot moves
+        ready.clear()
         val adv = advisor ?: return
-        say("bot will likely play $san · getting your answer ready")
-        val a = adv.full(after, c.nMoves, c.thinkMs, threat = c.showThreat)
-        if (adv.listerError == null && a.cands.isNotEmpty()) {
-            ready.clear()
-            ready[afterKey] = a
-            showPremove(model, a, after, g, wb, c)
+        var shown: OverlayModel = model
+        var preFrom: RectF? = null
+        var preTo: RectF? = null
+        for ((i, x) in gs.withIndex()) {
+            if (boardMoved()) return
+            say("bot will likely play ${x.san} · getting your answer ready")
+            val ms = if (i == 0) c.thinkMs else maxOf(250, c.thinkMs / 2)
+            val a = adv.full(x.after, c.nMoves, ms, threat = c.showThreat)
+            if (adv.listerError != null || a.cands.isEmpty()) continue
+            ready[Game.posKey(x.after)] = a
+            if (!c.premove) continue
+            val best = a.cands.first()
+            answers[i] = Game.san(x.after, best.move)
+            if (i == 0) {
+                preFrom = squareRect(g, wb, best.move.substring(0, 2))
+                preTo = squareRect(g, wb, best.move.substring(2, 4))
+            }
+            if (lastModel !== shown || boardMoved()) return // something else is on the screen by now
+            val next = model.withGuesses(draws(), preFrom, preTo)
+            predModel = next
+            shown = next
+            showModel(next, restart = false)
         }
-        say("your answer is ready if the bot plays $san")
+        say("your answers are ready: " + gs.joinToString("  ") { it.san })
     }
+
+    /** one guess of the bot's next move */
+    private class Guess(val move: String, val after: String, val from: RectF, val to: RectF, val san: String, val prob: Float?)
 
     /** remembers the score of a position, and finishes the accuracy of the move that led to it */
     private fun noteEval(key: String, evalWhite: Int) {
@@ -745,7 +806,7 @@ class ChessService : Service(), SideBarHost, SharedPreferences.OnSharedPreferenc
         pendingAcc = null
         val before = evals[p.first] ?: return
         val moverWhite = p.third
-        accuracy.add(moverWhite == (cfg?.iAmWhite ?: true), moverWhite, before, evalWhite)
+        accuracy.add(moverWhite == (tracker?.meWhite() ?: true), moverWhite, before, evalWhite)
         accLine = accuracy.text()
     }
 
@@ -763,18 +824,6 @@ class ChessService : Service(), SideBarHost, SharedPreferences.OnSharedPreferenc
         lastFen = null
         pendingJudge = null
         badgeCache = null
-    }
-
-    /** puts your answer to the bot's guessed move next to the guess (a premove), if that is still the picture on the screen */
-    private fun showPremove(guess: OverlayModel, answer: Advice, after: String, g: BoardGeom, wb: Boolean, c: Cfg) {
-        if (!c.premove) return
-        if (lastModel !== guess) return // something else is on the screen by now
-        val best = answer.cands.firstOrNull() ?: return
-        val fr = squareRect(g, wb, best.move.substring(0, 2)) ?: return
-        val to = squareRect(g, wb, best.move.substring(2, 4)) ?: return
-        val withPre = guess.withPremove(fr, to, Game.san(after, best.move))
-        predModel = withPre
-        showModel(withPre, restart = false)
     }
 
     /** labels the move that was just played (on the square it went to). analysis only, it changes nothing about the moves we pick */
@@ -817,6 +866,31 @@ class ChessService : Service(), SideBarHost, SharedPreferences.OnSharedPreferenc
         main.post { overlay?.setBadge(BadgeModel(rect, mv.label)) }
     }
 
+    /**
+     * the match history: the game being played is saved after every move (moves, your side, result when the board
+     * shows one, accuracy, opening). a new record starts when the game record starts over
+     */
+    private fun saveHistory(tracker: Tracker, b: Board) {
+        if (tracker.logEpoch != histEpoch) {
+            histEpoch = tracker.logEpoch
+            histId = System.currentTimeMillis()
+        }
+        val moves = tracker.playedMoves
+        if (moves.size < 2) return
+        try {
+            val me = tracker.meWhite()
+            val (result, how) = GameHistory.resultOf(b, me)
+            GameHistory.put(this, SavedGame(
+                id = histId, startFen = tracker.startFen, moves = ArrayList(moves), meWhite = me,
+                result = result, how = how, accMe = accuracy.myScore, accOpp = accuracy.botScore,
+                opening = GameHistory.openingOf(tracker.startFen, moves, book), updated = System.currentTimeMillis(),
+                engine = engineName
+            ))
+        } catch (e: Exception) {
+            // the history is a nice extra: never let it stop the helper
+        }
+    }
+
     private fun boardRectOf(g: BoardGeom) = RectF(g.left.toFloat(), g.top.toFloat(), (g.left + g.size).toFloat(), (g.top + g.size).toFloat())
 
     private fun debugLine(tracker: Tracker, step: Tracker.Step) {
@@ -848,7 +922,7 @@ class ChessService : Service(), SideBarHost, SharedPreferences.OnSharedPreferenc
         if (m.preFrom != null && m.preTo != null) pairs.add(Pair(m.preFrom, m.preTo))
         for (s in m.line) pairs.add(Pair(s.from, s.to))
         if (m.threatFrom != null && m.threatTo != null) pairs.add(Pair(m.threatFrom, m.threatTo))
-        if (m.predFrom != null && m.predTo != null) pairs.add(Pair(m.predFrom, m.predTo))
+        for (gs in m.guesses) pairs.add(Pair(gs.from, gs.to))
         for ((a, b) in pairs) {
             ends.add(screenIndexOf(a.centerX(), a.centerY(), g))
             ends.add(screenIndexOf(b.centerX(), b.centerY(), g))
@@ -865,7 +939,7 @@ class ChessService : Service(), SideBarHost, SharedPreferences.OnSharedPreferenc
             // the same picture plus a small addition: no new entrance animation, just a short wait for it to settle
             main.post { overlay?.updateModel(m) }
             Thread.sleep(350)
-            look()?.let { prevThumb = thumbOf(it) }
+            settle()
             return
         }
         main.post { overlay?.setModel(m) }
@@ -873,7 +947,29 @@ class ChessService : Service(), SideBarHost, SharedPreferences.OnSharedPreferenc
         val c = cfg
         val anim = if (c != null && c.anim) ((OverlayLook.DRAW_MS + OverlayLook.GLOW_MS) / c.animSpeed).toLong() else 0L
         Thread.sleep(350 + anim)
-        look()?.let { prevThumb = thumbOf(it) }
+        settle()
+    }
+
+    /**
+     * after drawing: the picture now on the screen becomes the calm one we compare against. but if the board itself
+     * changed while we were busy (a fast bot, or you moved quickly), don't swallow that change: read it right away
+     */
+    private fun settle() {
+        val f = look() ?: return
+        if (forcedReads < 2 && !justCosmetic(f)) {
+            forcedReads++
+            prevThumb = null
+            return
+        }
+        prevThumb = thumbOf(f)
+    }
+
+    /** true if the board changed since we last read it (our own drawing doesn't count) */
+    private fun boardMoved(): Boolean {
+        val f = look() ?: return true
+        val p = prevThumb ?: return true
+        if (!BoardVision.changed(p, thumbOf(f))) return false
+        return !justCosmetic(f)
     }
 
     /** which screen square (row * 8 + column) a point is on */
@@ -929,6 +1025,7 @@ class ChessService : Service(), SideBarHost, SharedPreferences.OnSharedPreferenc
     }
 
     companion object {
+        const val GUESSES = 3 // how many of the bot's likely moves to show while it thinks
         private const val POLL = 120L // ms between looks at the screen
     }
 
