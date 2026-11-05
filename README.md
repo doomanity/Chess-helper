@@ -22,10 +22,10 @@ github builds it for you. open the Actions tab and wait for the build (about 5 t
 
 ## extras
 
-- **guess the bot's move**: while the bot thinks, faint dashed arrows show its 3 most likely moves (maia3 at the bot's rating if you use maia3, else stockfish's best moves). with maia3 each one shows maia3's odds, like "Nf6 52%" (update `tools/maia3_server.py` on your pc and restart it to get the odds). your answer to each guess is worked out early, so if the bot plays one of them your moves show up at once ("ready early" on the card)
+- **guess the bot's move**: while the bot thinks, thin dashed arrows show its 3 most likely moves, each in its own color with a number (1 blue, 2 orange, 3 purple) (maia3 at the bot's rating if you use maia3, else stockfish's best moves). with maia3 each one shows maia3's odds, like "Nf6 52%" (update `tools/maia3_server.py` on your pc and restart it to get the odds). your answer to each guess is worked out early, so if the bot plays one of them your moves show up at once ("ready early" on the card)
 - **live accuracy**: "you 87% · bot 72%" on the card, lichess style. each move is scored by how much it dropped the mover's winning chances. moves the app missed (two moves at once) are skipped
 - **move labels**: every move that was just played (yours and the bot's) gets a small badge on the square it went to: brilliant, great, best, excellent, good, book, inaccuracy, mistake, miss or blunder. brilliant and great glow blue with a shimmer. it is analysis only and never changes which moves are suggested. each label costs about half a second of stockfish. the "move labels" switch turns it off, and the rating used to judge comes from the review screen
-- **premove**: the card lists your answer to each of the 3 guesses ("you: e5"), and the answer to the most likely one is drawn on the board as a dashed arrow with a "P". if the bot plays a guess, your real suggestion shows at once. the "premove" switch turns it off
+- **premove**: your answer to each guess is drawn on the board in the same color with the same number, and listed on the card ("1 Nf6 52% → e5"). so if the bot plays guess 2, play the orange premove 2. if two guesses have the same answer it shows both numbers ("1·2"). the guesses show up right away and the premoves fill in one by one (the most likely first). the "premove" switch turns it off
 - **blunder alert**: on your turn, after the suggestions show up, every square where any move of yours would be a blunder turns dark red with a skull (one extra stockfish search that scores every legal move). and when a move that was just played is a blunder (yours or the bot's), its square gets a big skull that drops in and shakes. turn it off with "blunder alert"
 - **match history**: every game the helper follows is saved by itself: result, your side, accuracy, opening, date. open it from the app ("match history"). tap a game to review it. the board only shows checkmate and stalemate, so hold a game to set the result yourself after a resign or a loss on time (or to delete it)
 - **pause**: hides everything and stops reading the screen until you resume
@@ -55,6 +55,8 @@ the opening book is `app/src/main/assets/openings.tsv`. rebuild it with `tools/b
 ## reading the board
 
 - a new game is seen by itself as soon as the start position shows up, either way up. the way the board faces tells your side, so a game as black right after a game as white needs nothing (with "i play: auto")
+- started in the middle of a game, your side is worked out from several clues: where the pawns stand (they only move forward), where the kings are, the board's coordinates, and which half has more white pieces
+- pause clears the board, and nothing from before the pause comes back after resume
 - if you (or the bot) move while the helper is still drawing, it notices and reads the board again right away, so the suggestions don't get stuck on the bot's turn
 - a promoted piece is looked at a few more times after the promotion (the first look can catch the piece picker or the animation). if it was misread, it is fixed by itself, also when the piece already moved
 
@@ -89,4 +91,4 @@ open the failed run in the Actions tab, copy the red error text and send it to c
 
 selftest/SelfTest.kt checks the board reading and game following on a real screenshot and on simulated games (both sides, flipped board, castling, en passant, promotion, mid-game start). it runs on a computer, not in the app.
 
-selftest/ReviewTest.kt checks the move labels (brilliant, great, miss, the thresholds, the opening hash, pgn text reading) with made-up engine numbers. it needs no phone, no engine and no chess library: compile it with app/src/main/java/com/example/chesshelper/{Review,Accuracy,Candidates}.kt and run `ReviewTest`.
+selftest/ReviewTest.kt checks the move labels (brilliant, great, miss, the thresholds, the opening hash, pgn text reading) with made-up engine numbers. it needs no phone, no engine and no chess library: compile it with app/src/main/java/com/example/chesshelper/{Review,Accuracy,Candidates,HaikuParse}.kt and run `ReviewTest`.

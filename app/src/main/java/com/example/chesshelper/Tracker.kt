@@ -385,7 +385,7 @@ class Tracker(var iAmWhite: Boolean, private val myTurnAtStart: Boolean) {
     fun supplyGrid(grid: List<String>, claimWhiteBottom: Boolean?, screen: IntArray, reads: Array<SquareRead>? = null): Boolean {
         val gridScreen = Game.gridOcc(grid)
         if (Game.mismatch(gridScreen, screen) > 3) return false
-        val wb = BoardVision.whiteBottomOf(gridScreen) ?: claimWhiteBottom ?: iAmWhite
+        val wb = HaikuParse.whiteBottom(grid, claimWhiteBottom) ?: BoardVision.whiteBottomOf(screen) ?: iAmWhite
         val placement = Game.placementFromGrid(grid, wb)
         if (!Game.isValidPlacement(placement)) return false
         val mine = me(wb)

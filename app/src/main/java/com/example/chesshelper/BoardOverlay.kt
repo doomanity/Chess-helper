@@ -32,7 +32,10 @@ class LineStep(val from: RectF, val to: RectF, val n: Int, val mine: Boolean)
  * one guess of the bot's next move while it thinks: where it goes, how likely it is (maia3's odds, null with
  * stockfish) and your answer to it once that is worked out (null while still thinking)
  */
-class GuessDraw(val from: RectF, val to: RectF, val san: String, val prob: Float?, val answer: String?)
+class GuessDraw(
+    val from: RectF, val to: RectF, val san: String, val prob: Float?, val answer: String?,
+    val ansFrom: RectF? = null, val ansTo: RectF? = null   // your premove for this guess, drawn on the board
+)
 
 /** everything to draw for one position */
 class OverlayModel(
@@ -46,19 +49,17 @@ class OverlayModel(
     val line: List<LineStep> = emptyList(),
     val title: String = "",
     val accuracy: String? = null,     // like "you 87% · bot 72%"
-    val guesses: List<GuessDraw> = emptyList(), // the bot's likely next moves, most likely first (shown while it thinks)
-    val preFrom: RectF? = null,       // your answer to the most likely guess, ready before the bot moves (a premove)
-    val preTo: RectF? = null,
+    val guesses: List<GuessDraw> = emptyList(), // the bot's likely next moves, most likely first, each with your premove
     val danger: List<RectF> = emptyList() // blunder alert: squares where every move of yours that goes there blunders
 ) {
-    /** the same picture with new guesses (answers filled in) and the premove */
-    fun withGuesses(gs: List<GuessDraw>, from: RectF?, to: RectF?) = OverlayModel(
-        moves, board, whiteBottom, evalShare, evalText, threatFrom, threatTo, line, title, accuracy, gs, from, to, danger
+    /** the same picture with new guesses (answers filled in) */
+    fun withGuesses(gs: List<GuessDraw>) = OverlayModel(
+        moves, board, whiteBottom, evalShare, evalText, threatFrom, threatTo, line, title, accuracy, gs, danger
     )
 
     /** the same picture with the blunder alert squares */
     fun withDanger(sq: List<RectF>) = OverlayModel(
-        moves, board, whiteBottom, evalShare, evalText, threatFrom, threatTo, line, title, accuracy, guesses, preFrom, preTo, sq
+        moves, board, whiteBottom, evalShare, evalText, threatFrom, threatTo, line, title, accuracy, guesses, sq
     )
 }
 
@@ -83,6 +84,10 @@ class OverlayLook(
 class BoardOverlay(ctx: Context) : View(ctx) {
     companion object {
         val PREDICT = Color.rgb(200, 206, 222) // the bot's guessed move: soft grey-white
+
+        /** guess 1, 2, 3 and the premove that answers it share a color (and a number) */
+        val GUESS_COLORS = intArrayOf(Color.rgb(90, 200, 250), Color.rgb(255, 159, 10), Color.rgb(191, 90, 242))
+        fun guessColor(i: Int) = GUESS_COLORS[i.coerceIn(0, GUESS_COLORS.size - 1)]
     }
 
     private var model: OverlayModel? = null
@@ -199,7 +204,7 @@ class BoardOverlay(ctx: Context) : View(ctx) {
             if (m.threatFrom != null && m.threatTo != null) drawThreat(canvas, m.threatFrom, m.threatTo)
             // the less likely guesses first, so the most likely one is drawn on top
             for (i in m.guesses.indices.reversed()) drawPrediction(canvas, m.guesses[i], i)
-            if (m.preFrom != null && m.preTo != null) drawPremove(canvas, m.preFrom, m.preTo)
+            drawPremoves(canvas, m.guesses)
             // the worst first, so the best move is drawn on top
             for (mv in m.moves.sortedByDescending { it.rank }) drawMove(canvas, mv)
             if (m.moves.isNotEmpty() || m.guesses.isNotEmpty()) drawCard(canvas, m, screenW)
@@ -375,48 +380,67 @@ class BoardOverlay(ctx: Context) : View(ctx) {
     }
 
     /**
-     * one of the bot's likely next moves: a faint dashed arrow with a small tag at its end. the most likely guess is
-     * drawn the strongest, the others thinner and fainter. the tag shows the odds (like 52%), or the rank
+     * one of the bot's likely next moves: a thin dashed arrow in its own color, with a tag at its end that says its
+     * number and, with maia3, its odds (like "1 52%")
      */
     private fun drawPrediction(c: Canvas, g: GuessDraw, rank: Int) {
         val sq = g.to.width()
-        val col = PREDICT
-        val strength = when (rank) { 0 -> 0.62f; 1 -> 0.42f; else -> 0.3f }
-        arrow(c, g.from, g.to, col, sq * (if (rank == 0) 0.07f else 0.05f) * look.arrowSize, strength, true)
-        val tag = g.prob?.let { "${Math.round(it * 100)}%" } ?: if (rank == 0) "?" else "${rank + 1}"
-        val h = sq * 0.26f * drawP
+        val col = guessColor(rank)
+        arrow(c, g.from, g.to, col, sq * 0.055f * look.arrowSize, if (rank == 0) 0.6f else 0.48f, true)
+        val tag = g.prob?.let { "${rank + 1}  ${Math.round(it * 100)}%" } ?: "${rank + 1}"
+        val h = sq * 0.27f * drawP
         if (h < 2f) return
         text.textSize = h * 0.62f
         text.typeface = medium
         text.textAlign = Paint.Align.CENTER
-        val w = maxOf(h, text.measureText(tag) + h * 0.55f)
-        val cx = g.to.right - sq * 0.06f - w / 2f
-        val cy = g.to.top + sq * 0.06f + h / 2f
-        fill.color = Theme.withAlpha(col, (if (rank == 0) 245 else 200))
+        val w = maxOf(h, text.measureText(tag) + h * 0.6f)
+        val cx = g.to.right - sq * 0.05f - w / 2f
+        val cy = g.to.top + sq * 0.05f + h / 2f
+        fill.color = Theme.withAlpha(col, 235)
         c.drawRoundRect(cx - w / 2f, cy - h / 2f, cx + w / 2f, cy + h / 2f, h / 2f, h / 2f, fill)
-        text.color = Color.rgb(20, 24, 36)
+        text.color = Color.rgb(16, 18, 26)
         c.drawText(tag, cx, cy + h * 0.22f, text)
         text.color = Color.WHITE
         text.typeface = regular
     }
 
-    /** your answer to the bot's guessed move, drawn ahead of time like a premove: a ghost arrow in the accent color */
-    private fun drawPremove(c: Canvas, from: RectF, to: RectF) {
+    /**
+     * your premoves: the answer to each guess, in that guess's color with its number on the square it goes to. when
+     * two guesses have the same answer, it is drawn once with both numbers (like "1·2")
+     */
+    private fun drawPremoves(c: Canvas, guesses: List<GuessDraw>) {
+        val groups = LinkedHashMap<String, MutableList<Int>>()
+        for ((i, g) in guesses.withIndex()) {
+            val f = g.ansFrom ?: continue
+            val t = g.ansTo ?: continue
+            groups.getOrPut("${f.left},${f.top},${t.left},${t.top}") { ArrayList() }.add(i)
+        }
+        // the less likely first, so the most likely answer ends up on top
+        for (ranks in groups.values.reversed()) {
+            val g = guesses[ranks[0]]
+            drawPremove(c, g.ansFrom!!, g.ansTo!!, guessColor(ranks[0]), ranks.joinToString("·") { "${it + 1}" })
+        }
+    }
+
+    private fun drawPremove(c: Canvas, from: RectF, to: RectF, col: Int, label: String) {
         val sq = to.width()
-        val col = look.accent
-        fill.color = Theme.withAlpha(col, (40 * drawP).toInt())
+        fill.color = Theme.withAlpha(col, (55 * drawP).toInt())
         c.drawRoundRect(to, sq * 0.12f, sq * 0.12f, fill)
-        arrow(c, from, to, col, sq * 0.085f * look.arrowSize, 0.6f, true)
-        val r = sq * 0.13f * drawP
+        arrow(c, from, to, col, sq * 0.085f * look.arrowSize, 0.8f, true)
+        val r = sq * 0.15f * drawP
         if (r > 1f) {
-            val bx = to.left + sq * 0.18f
-            val by = to.top + sq * 0.18f
-            badge(c, bx, by, r, col)
-            text.textSize = r * 1.3f
+            text.textSize = r * (if (label.length > 1) 1.0f else 1.3f)
             text.textAlign = Paint.Align.CENTER
             text.isFakeBoldText = true
-            text.color = Color.rgb(10, 14, 24)
-            c.drawText("P", bx, by + r * 0.46f, text)
+            val w = maxOf(r * 2f, text.measureText(label) + r)
+            val bx = to.left + sq * 0.06f + w / 2f
+            val by = to.top + sq * 0.06f + r
+            fill.color = Color.argb(150, 0, 0, 0)
+            c.drawRoundRect(bx - w / 2f - 1.5f * d, by - r - 1.5f * d, bx + w / 2f + 1.5f * d, by + r + 1.5f * d, r + 1.5f * d, r + 1.5f * d, fill)
+            fill.color = col
+            c.drawRoundRect(bx - w / 2f, by - r, bx + w / 2f, by + r, r, r, fill)
+            text.color = Color.rgb(12, 14, 22)
+            c.drawText(label, bx, by + r * 0.4f, text)
             text.color = Color.WHITE
             text.isFakeBoldText = false
         }
@@ -616,13 +640,14 @@ class BoardOverlay(ctx: Context) : View(ctx) {
                 c.drawLine(rect.left + pad + rowH * 0.95f, ly, rect.right - pad, ly, stroke)
             }
             val dotX = rect.left + pad + rowH * 0.36f
-            fill.color = Theme.withAlpha(PREDICT, if (i == 0) 255 else 170)
+            val gcol = guessColor(i)
+            fill.color = gcol
             c.drawCircle(dotX, cy, rowH * 0.3f, fill)
             text.textSize = rowH * 0.4f
             text.textAlign = Paint.Align.CENTER
             text.isFakeBoldText = true
-            text.color = Color.rgb(20, 24, 36)
-            c.drawText(if (i == 0) "?" else "${i + 1}", dotX, cy + rowH * 0.14f, text)
+            text.color = Color.rgb(16, 18, 26)
+            c.drawText("${i + 1}", dotX, cy + rowH * 0.14f, text)
             text.isFakeBoldText = false
             val tx = rect.left + pad + rowH * 0.95f
             text.textAlign = Paint.Align.LEFT
@@ -637,7 +662,7 @@ class BoardOverlay(ctx: Context) : View(ctx) {
                 text.color = Color.argb(153, 235, 235, 245)
                 c.drawText("${Math.round(it * 100)}%", sx, cy + rowH * 0.15f, text)
             }
-            // your answer: a "P" for the premove (the most likely guess), else just the move
+            // your premove for this guess, in the same color as its number
             text.typeface = medium
             text.textSize = rowH * 0.46f
             text.textAlign = Paint.Align.RIGHT
@@ -645,9 +670,9 @@ class BoardOverlay(ctx: Context) : View(ctx) {
             if (ans == null) {
                 text.color = Color.argb(90, 235, 235, 245)
                 c.drawText("…", rect.right - pad - 4f * d, cy + rowH * 0.17f, text)
-            } else {
-                text.color = look.accent
-                c.drawText("you: $ans", rect.right - pad - 4f * d, cy + rowH * 0.17f, text)
+            } else if (ans.isNotEmpty()) {
+                text.color = gcol
+                c.drawText("→ $ans", rect.right - pad - 4f * d, cy + rowH * 0.17f, text)
             }
             text.typeface = regular
             text.color = Color.WHITE

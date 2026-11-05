@@ -68,6 +68,21 @@ object ReviewTest {
         check(l(ply(sac = true, bestScore = 29990, second = 29950, after = null)) != Label.BRILLIANT, "no brilliant when a quiet move mates too")
         check(l(ply(played = "d2d4", bestScore = 100, after = -29990)) == Label.BLUNDER, "walking into a mate is a blunder")
 
+        // --- which side is at the bottom, from a board read as screen rows
+        fun rows(fen: String, whiteBottom: Boolean): List<String> {
+            val ranks = fen.substringBefore(' ').split("/").map { r -> r.map { if (it.isDigit()) ".".repeat(it - '0') else it.toString() }.joinToString("") }
+            return if (whiteBottom) ranks else ranks.reversed().map { it.reversed() }
+        }
+        val attack = "r1bq1rk1/pp3pBp/2n1pN1Q/3pP3/3P2R1/2P5/P4PPP/R5K1 b - - 0 1" // white pieces swarm the black king
+        for (wb in listOf(true, false)) {
+            check(HaikuParse.whiteBottom(rows(attack, wb), null) == wb, "attack, no claim, whiteBottom=$wb")
+            check(HaikuParse.whiteBottom(rows(attack, wb), !wb) == wb, "attack, wrong claim: the pawns win, whiteBottom=$wb")
+            check(HaikuParse.whiteBottom(rows(attack, wb), wb) == wb, "attack, right claim, whiteBottom=$wb")
+        }
+        val ending = "8/2P1K3/1R6/8/8/8/5k2/8 w - - 0 1" // white king and pawn far up the board: only the coordinates know
+        for (wb in listOf(true, false)) check(HaikuParse.whiteBottom(rows(ending, wb), wb) == wb, "ending, trust the coordinates, whiteBottom=$wb")
+        check(HaikuParse.whiteBottom(rows("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1", false), null) == false, "start, black at the bottom")
+
         // --- the blunder alert: squares where every move of yours that goes there blunders
         val sqs = Labeler.blunderSquares(50, listOf(
             Pair("d3e4", -400), Pair("f3e4", -350),        // both moves to e4 lose a lot

@@ -115,6 +115,10 @@ class ChessService : Service(), SideBarHost, SharedPreferences.OnSharedPreferenc
     private var histEpoch = -1
     private var histId = 0L
 
+    @Volatile private var dropOnResume = false
+    private var settleAt = 0L // when what we last drew is fully on the screen
+    private var forcedClear = false
+
     private enum class Mode { NORMAL, RETHINK, SAVE }
 
     override fun onBind(intent: Intent?): IBinder? = null
@@ -210,7 +214,7 @@ class ChessService : Service(), SideBarHost, SharedPreferences.OnSharedPreferenc
         cfg = c
         if (key != null && key in Cfg.LOOK_KEYS) {
             overlay?.setLook(lookOf(c))
-            lastModel?.let { if (overlayShown) overlay?.setModel(it) }
+            lastModel?.let { if (overlayShown && !paused) overlay?.setModel(it) }
             if (key == "sidebar" || key == "theme" || key == "handle_side" || key == "handle_mode" ||
                 key == "handle_size" || key == "handle_idle") {
                 val sb = sideBar
@@ -252,6 +256,9 @@ class ChessService : Service(), SideBarHost, SharedPreferences.OnSharedPreferenc
 
     override fun onPauseToggle() {
         paused = !paused
+        // forget everything drawn before: after a pause the screen may show another game, and an old picture
+        // must never come back (the worker drops its cached drawings too, see dropDrawings)
+        dropOnResume = true
         if (!paused) {
             prevThumb = null
             wantRead = true
@@ -399,8 +406,12 @@ class ChessService : Service(), SideBarHost, SharedPreferences.OnSharedPreferenc
                         Thread.sleep(200)
                         continue
                     }
+                    if (dropOnResume) {
+                        dropOnResume = false
+                        dropDrawings()
+                    }
                     if (paused) {
-                        hideMove()
+                        hideMove(force = true)
                         main.post { overlay?.setDebug("paused") }
                         prevThumb = null
                         Thread.sleep(300)
@@ -425,7 +436,7 @@ class ChessService : Service(), SideBarHost, SharedPreferences.OnSharedPreferenc
                     val f = look()
                     if (f == null) {
                         if (lostBoardSince == 0L) lostBoardSince = now
-                        if (now - lostBoardSince > 1200) hideMove()
+                        if (now - lostBoardSince > 1200) hideMove(force = true)
                         say("looking for the chess board...")
                         prevThumb = null
                         geom = null
@@ -512,7 +523,7 @@ class ChessService : Service(), SideBarHost, SharedPreferences.OnSharedPreferenc
         if (overlayShown) {
             // our own drawing would be part of the picture
             hideMove()
-            Thread.sleep(250)
+            Thread.sleep(180)
             f = look() ?: return Tracker.Step.UNREADABLE
         }
         val reads = BoardVision.readSquares(f.px, f.w, f.local)
@@ -707,8 +718,10 @@ class ChessService : Service(), SideBarHost, SharedPreferences.OnSharedPreferenc
     }
 
     /**
-     * the bot's turn: score the position (for accuracy), guess the bot's move and show it,
-     * then work out our answer to that move early so it shows up at once if the guess was right
+     * the bot's turn: score the position (for accuracy), guess the bot's 3 likely moves and show them at once,
+     * then work out your answer to each one (a premove with the same number and color as its guess), so your move
+     * shows up the moment the bot plays one of them. nothing here waits for an animation: the screen gets its new
+     * calm picture at the end
      */
     private fun botTurn(fen: String, key: String, g: BoardGeom, wb: Boolean, c: Cfg, mode: Mode) {
         val cachedPred = predModel
@@ -720,8 +733,26 @@ class ChessService : Service(), SideBarHost, SharedPreferences.OnSharedPreferenc
         say("waiting for the opponent...")
         if (!c.predict && !c.showAcc && !c.showLabels) return
         val sf = stockfish ?: return
-        // the review helper remembers its searches, so judging the next move reuses this one
-        val top = (if (c.showLabels) review?.topLine(fen, 250) else null) ?: sf.analyse(fen, 250, 1).firstOrNull()
+
+        // maia3 on the pc guesses the bot's moves while stockfish scores the position: both at the same time
+        val r = if (c.predict) remote else null
+        var fromPc: List<Pair<String, Float?>>? = null
+        val net = r?.let { rr ->
+            Thread {
+                try {
+                    fromPc = rr.opponentGuesses(fen, c.maiaElo, GUESSES)
+                } catch (e: Exception) {
+                    // pc not reachable: stockfish's guesses below
+                }
+            }.also { it.isDaemon = true; it.start() }
+        }
+        // one search gives the score (eval bar, accuracy) and, without maia3, the guesses
+        val lines = try {
+            sf.analyse(fen, 300, if (c.predict) GUESSES else 1)
+        } catch (e: IllegalStateException) {
+            emptyList()
+        }
+        val top = lines.firstOrNull()
         if (top == null) {
             runJudge(g, wb, fen, key, c)
             return
@@ -733,26 +764,9 @@ class ChessService : Service(), SideBarHost, SharedPreferences.OnSharedPreferenc
             runJudge(g, wb, fen, key, c)
             return
         }
+        net?.join(4000)
+        val raw = fromPc?.takeIf { it.isNotEmpty() } ?: lines.map { Pair<String, Float?>(it.move, null) }
 
-        // the bot's 3 most likely moves: maia3 playing as the bot (with maia3's odds when the pc server sends them),
-        // else stockfish's best moves (no odds then)
-        var raw: List<Pair<String, Float?>> = emptyList()
-        val r = remote
-        if (r != null) {
-            try {
-                raw = r.opponentGuesses(fen, c.maiaElo, GUESSES)
-            } catch (e: java.io.IOException) {
-                // pc not reachable: stockfish's guesses below
-            } catch (e: org.json.JSONException) {
-            }
-        }
-        if (raw.isEmpty()) {
-            raw = try {
-                sf.analyse(fen, 250, GUESSES).map { Pair<String, Float?>(it.move, null) }
-            } catch (e: IllegalStateException) {
-                listOf(Pair<String, Float?>(top.move, null))
-            }
-        }
         val gs = ArrayList<Guess>()
         for ((mv, prob) in raw) {
             if (gs.size >= GUESSES) break
@@ -767,10 +781,12 @@ class ChessService : Service(), SideBarHost, SharedPreferences.OnSharedPreferenc
             return
         }
         val evalInfo = Advice(emptyList(), evalWhite, top.mate?.let { if (whiteToMove) it else -it }, null, emptyList())
-        // answers: null = still thinking, "" = not shown (premove off)
+        // your answers: null = still thinking, "" = not shown (premove off)
         val answers = arrayOfNulls<String>(gs.size)
+        val ansFrom = arrayOfNulls<RectF>(gs.size)
+        val ansTo = arrayOfNulls<RectF>(gs.size)
         if (!c.premove) for (i in answers.indices) answers[i] = ""
-        fun draws() = gs.mapIndexed { i, x -> GuessDraw(x.from, x.to, x.san, x.prob, answers[i]) }
+        fun draws() = gs.mapIndexed { i, x -> GuessDraw(x.from, x.to, x.san, x.prob, answers[i], ansFrom[i], ansTo[i]) }
         val model = OverlayModel(
             emptyList(), boardRectOf(g), wb,
             evalShare = if (c.showEval) evalInfo.whiteShare else null,
@@ -781,37 +797,35 @@ class ChessService : Service(), SideBarHost, SharedPreferences.OnSharedPreferenc
         )
         predShownKey = key
         predModel = model
-        showModel(model)
-        runJudge(g, wb, fen, key, c)
+        showModel(model, wait = false)
 
-        // our answer to each guess, most likely first, so it shows up at once if the bot plays one of them.
-        // the less likely ones get a shorter think. stop as soon as the bot moves
+        // your answer to each guess, most likely first, with a short think each. stop as soon as the bot moves
+        // (the screen then still differs from the last calm picture, so the main loop reads it right away)
         ready.clear()
-        val adv = advisor ?: return
+        val adv = advisor
         var shown: OverlayModel = model
-        var preFrom: RectF? = null
-        var preTo: RectF? = null
-        for ((i, x) in gs.withIndex()) {
+        if (adv != null) for ((i, x) in gs.withIndex()) {
             if (boardMoved()) return
             say("bot will likely play ${x.san} · getting your answer ready")
-            val ms = if (i == 0) c.thinkMs else maxOf(250, c.thinkMs / 2)
+            val ms = if (i == 0) maxOf(300, (c.thinkMs * 0.6f).toInt()) else maxOf(250, (c.thinkMs * 0.4f).toInt())
             val a = adv.full(x.after, c.nMoves, ms, threat = c.showThreat)
             if (adv.listerError != null || a.cands.isEmpty()) continue
             ready[Game.posKey(x.after)] = a
             if (!c.premove) continue
             val best = a.cands.first()
             answers[i] = Game.san(x.after, best.move)
-            if (i == 0) {
-                preFrom = squareRect(g, wb, best.move.substring(0, 2))
-                preTo = squareRect(g, wb, best.move.substring(2, 4))
-            }
+            ansFrom[i] = squareRect(g, wb, best.move.substring(0, 2))
+            ansTo[i] = squareRect(g, wb, best.move.substring(2, 4))
             if (lastModel !== shown || boardMoved()) return // something else is on the screen by now
-            val next = model.withGuesses(draws(), preFrom, preTo)
+            val next = model.withGuesses(draws())
             predModel = next
             shown = next
-            showModel(next, restart = false)
+            showModel(next, restart = false, wait = false)
         }
+        settleLater()
         say("your answers are ready: " + gs.joinToString("  ") { it.san })
+        // the label of the move you just played comes last: the premoves matter more right now
+        runJudge(g, wb, fen, key, c)
     }
 
     /** one guess of the bot's next move */
@@ -882,7 +896,9 @@ class ChessService : Service(), SideBarHost, SharedPreferences.OnSharedPreferenc
         badgeNearUntil = SystemClock.elapsedRealtime() + (if (glows) 3900L else 700L)
         badgeIdx = idx
         if (idx !in overlaySquares) overlaySquares += idx // a piece appearing or leaving there is still a real change
+        if (paused) return
         overlayShown = true
+        forcedClear = false
         main.post { overlay?.setBadge(BadgeModel(rect, mv.label)) }
     }
 
@@ -920,8 +936,18 @@ class ChessService : Service(), SideBarHost, SharedPreferences.OnSharedPreferenc
 
     // ---------------------------------------------------------------- overlay
 
-    private fun hideMove() {
-        if (!overlayShown) return
+    /**
+     * takes our drawing off the screen. force: clear it even if we think nothing is shown (pause, no board on the
+     * screen), so a drawing can never get stuck
+     */
+    private fun hideMove(force: Boolean = false) {
+        if (!overlayShown && !force) return
+        if (!overlayShown) {
+            if (forcedClear) return // already cleared, don't post it again every loop
+            forcedClear = true
+            main.post { overlay?.clearMove() }
+            return
+        }
         overlayShown = false
         overlaySquares = IntArray(0)
         overlayCrossed = IntArray(0)
@@ -931,15 +957,32 @@ class ChessService : Service(), SideBarHost, SharedPreferences.OnSharedPreferenc
         main.post { overlay?.clearMove() }
     }
 
-    private fun showModel(m: OverlayModel, restart: Boolean = true) {
+    /** the cached drawings (suggestions, the bot's guesses, the move label) are dropped: they get worked out again */
+    private fun dropDrawings() {
+        hideMove(force = true)
+        shownFen = null
+        shownModel = null
+        predShownKey = null
+        predModel = null
+        lastModel = null
+        badgeCache = null
+    }
+
+    /**
+     * draws a picture. wait = true: wait until it is fully on the screen (and its animation is over) and take that
+     * as the calm picture. wait = false: return at once, call settleLater() when done drawing
+     */
+    private fun showModel(m: OverlayModel, restart: Boolean = true, wait: Boolean = true) {
+        if (paused) return // never draw while paused
         overlayShown = true
+        forcedClear = false
         lastModel = m
         val g = BoardGeom(m.board.left.toInt(), m.board.top.toInt(), m.board.width().toInt())
         val ends = HashSet<Int>()
         val crossed = HashSet<Int>()
         val pairs = ArrayList<Pair<RectF, RectF>>()
         for (mv in m.moves) pairs.add(Pair(mv.from, mv.to))
-        if (m.preFrom != null && m.preTo != null) pairs.add(Pair(m.preFrom, m.preTo))
+        for (gs in m.guesses) if (gs.ansFrom != null && gs.ansTo != null) pairs.add(Pair(gs.ansFrom, gs.ansTo))
         for (s in m.line) pairs.add(Pair(s.from, s.to))
         if (m.threatFrom != null && m.threatTo != null) pairs.add(Pair(m.threatFrom, m.threatTo))
         for (gs in m.guesses) pairs.add(Pair(gs.from, gs.to))
@@ -958,18 +1001,26 @@ class ChessService : Service(), SideBarHost, SharedPreferences.OnSharedPreferenc
         crossed.removeAll(ends)
         overlaySquares = ends.toIntArray()
         overlayCrossed = crossed.toIntArray()
+        val now = SystemClock.elapsedRealtime()
         if (!restart) {
             // the same picture plus a small addition: no new entrance animation, just a short wait for it to settle
             main.post { overlay?.updateModel(m) }
-            Thread.sleep(350)
-            settle()
-            return
+            settleAt = maxOf(settleAt, now + 350)
+        } else {
+            main.post { overlay?.setModel(m) }
+            // our drawing (and its animation) has to be on the screen before we take the calm picture,
+            // so it isn't mistaken for a change on the board
+            val c = cfg
+            val anim = if (c != null && c.anim) ((OverlayLook.DRAW_MS + OverlayLook.GLOW_MS) / c.animSpeed).toLong() else 0L
+            settleAt = now + 350 + anim
         }
-        main.post { overlay?.setModel(m) }
-        // wait until our drawing (and its animation) is on screen, so it isn't mistaken for a change on the board
-        val c = cfg
-        val anim = if (c != null && c.anim) ((OverlayLook.DRAW_MS + OverlayLook.GLOW_MS) / c.animSpeed).toLong() else 0L
-        Thread.sleep(350 + anim)
+        if (wait) settleLater()
+    }
+
+    /** waits until what we drew is fully on the screen, then takes the calm picture (see settle) */
+    private fun settleLater() {
+        val left = settleAt - SystemClock.elapsedRealtime()
+        if (left > 0) Thread.sleep(left)
         settle()
     }
 
