@@ -683,7 +683,27 @@ class ChessService : Service(), SideBarHost, SharedPreferences.OnSharedPreferenc
         shownModel = model
         showModel(model)
         runJudge(g, wb, fen, key, c)
+        if (c.blunderSquares) showDanger(fen, model, g, wb, c)
         return step
+    }
+
+    /**
+     * the blunder alert: one more search that scores every legal move, then the squares where every move of yours
+     * that goes there is a blunder turn dark red with a skull. drawn after the suggestions, so they show up first
+     */
+    private fun showDanger(fen: String, model: OverlayModel, g: BoardGeom, wb: Boolean, c: Cfg) {
+        val sf = stockfish ?: return
+        val squares = try {
+            Danger.squares(sf, fen, maxOf(400, c.thinkMs), c.reviewRating)
+        } catch (e: Exception) {
+            return
+        }
+        if (squares.isEmpty()) return
+        if (lastModel !== model || boardMoved()) return // you already moved
+        val rects = squares.mapNotNull { squareRect(g, wb, it) }
+        val next = model.withDanger(rects)
+        shownModel = next
+        showModel(next, restart = false)
     }
 
     /**
@@ -932,6 +952,9 @@ class ChessService : Service(), SideBarHost, SharedPreferences.OnSharedPreferenc
             }
         }
         if (badgeIdx >= 0) ends.add(badgeIdx)
+        // the blunder alert squares are covered by a skull: the reader leaves them alone (your moves always start
+        // on a square of your own, which is never one of them, so a move is still seen)
+        for (r in m.danger) crossed.add(screenIndexOf(r.centerX(), r.centerY(), g))
         crossed.removeAll(ends)
         overlaySquares = ends.toIntArray()
         overlayCrossed = crossed.toIntArray()

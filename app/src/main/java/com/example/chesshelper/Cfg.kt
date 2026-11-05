@@ -19,7 +19,8 @@ class Cfg(p: SharedPreferences) {
     val maiaHuman = p.getInt("maia_human", 0)                   // 0..100: 0 = maia's top pick, 100 = full human randomness
     val predict = p.getBoolean("predict", true)                 // guess the bot's move while it thinks, get your answer ready
     val showAcc = p.getBoolean("show_acc", true)                // live accuracy for you and the bot
-    val showLabels = p.getBoolean("show_labels", true)          // label every move that was just played (brilliant, blunder...) on the board
+    val showLabels = p.getBoolean("show_labels", true)
+    val blunderSquares = p.getBoolean("blunder_squares", true) // on your turn, dark red skull squares where every move blunders          // label every move that was just played (brilliant, blunder...) on the board
     val premove = p.getBoolean("premove", true)                 // while the bot thinks, also show your answer to its guessed move
     val reviewRating = p.getInt("review_rating", 1500)          // how the labels are judged (same setting as the review screen)
     val nMoves = p.getInt("n_moves", 3).coerceIn(1, 4)

@@ -78,6 +78,7 @@ class Tracker(var iAmWhite: Boolean, private val myTurnAtStart: Boolean) {
     private var suspicious = 0
 
     companion object {
+        const val START_PLACEMENT = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR"
         const val MAX_PLY = 3
         const val LOST_MS = 2500L   // how long a position we can't explain has to stay on screen before we start over
         const val SUSPECT = 3       // this many piece types that look wrong means our board is probably wrong
@@ -125,6 +126,23 @@ class Tracker(var iAmWhite: Boolean, private val myTurnAtStart: Boolean) {
         for (sq in done) promo.remove(sq)
     }
 
+    /** true if the screen shows exactly the start position: white at the bottom (true), at the top (false), or not (null) */
+    private fun startOrientation(screen: IntArray): Boolean? {
+        val start = Game.startOcc()
+        if (Game.mismatch(Game.screenToChess(screen, true), start) == 0) return true
+        if (Game.mismatch(Game.screenToChess(screen, false), start) == 0) return false
+        return null
+    }
+
+    /** the game we follow gets to the start position with a move or two (knights out and back home): not a new game */
+    private fun reachesStart(b: Board, startWb: Boolean): Boolean {
+        if (whiteBottom != startWb) return false
+        val start = Game.startOcc()
+        return (1..2).any { d -> Game.hitsAt(b, start, d).any { it.mis == 0 } }
+    }
+
+    private fun atStart(b: Board): Boolean = Game.placement(b) == START_PLACEMENT && b.sideToMove == Side.WHITE
+
     /** forget the game, the next update asks for a fresh read. (what the pieces look like is kept) */
     fun forget() {
         board = null
@@ -144,6 +162,21 @@ class Tracker(var iAmWhite: Boolean, private val myTurnAtStart: Boolean) {
      * reads = what the vision saw per square (for the piece shapes), nowMs = a clock (any unit of milliseconds)
      */
     fun update(screen: IntArray, reads: Array<SquareRead>? = null, nowMs: Long = 0L): Step {
+        // a new game: the start position on the screen, either way up. the way it faces says which side is yours
+        // (the app shows your pieces at the bottom), so a game as black after a game as white just works
+        val startWb = startOrientation(screen)
+        val cur = board
+        if (startWb != null && cur != null && !(atStart(cur) && whiteBottom == startWb) && !reachesStart(cur, startWb)) {
+            val b = Board()
+            board = b
+            whiteBottom = startWb
+            restartLog(b)
+            needsVerify = false
+            suspicious = 0
+            clearMisses()
+            if (reads != null) learnFrom(b, startWb, screen, reads, all = true)
+            return Step.STARTED
+        }
         val known = board
         if (known == null || whiteBottom == null) {
             whiteBottom = BoardVision.whiteBottomOf(screen) ?: whiteBottom ?: iAmWhite
@@ -284,7 +317,14 @@ class Tracker(var iAmWhite: Boolean, private val myTurnAtStart: Boolean) {
      * can't recognize (hidden under a frame or a marker) get the most likely type that still fits a normal set.
      * false if we can't
      */
-    private fun resyncFromVision(screen: IntArray, seen: IntArray, reads: Array<SquareRead>, wb: Boolean): Boolean {
+    private fun resyncFromVision(screen: IntArray, seen: IntArray, reads: Array<SquareRead>, oldWb: Boolean): Boolean {
+        // the way the board faces normally stays the same during a game. but if the pieces can't stand like that
+        // (pawns on the last rank, for example), the board was flipped: try it the other way up too
+        for (wb in listOf(oldWb, !oldWb)) if (resyncAs(screen, seen, reads, wb)) return true
+        return false
+    }
+
+    private fun resyncAs(screen: IntArray, seen: IntArray, reads: Array<SquareRead>, wb: Boolean): Boolean {
         val types = seen.copyOf()
         val unknown = (0 until 64).filter { screen[it] != BoardVision.EMPTY && seen[it] == 0 }
         if (unknown.size > 3) return false
@@ -300,6 +340,7 @@ class Tracker(var iAmWhite: Boolean, private val myTurnAtStart: Boolean) {
         if (!Game.isValidPlacement(placement)) return false
         val whiteToMove = Game.turnFromChecks(placement) ?: me(wb) // no hint: assume it is our turn
         board = Game.newBoard(placement, whiteToMove)
+        whiteBottom = wb
         board?.let { restartLog(it) }
         needsVerify = false
         suspicious = 0

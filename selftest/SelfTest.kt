@@ -365,6 +365,48 @@ fun promoRecheck() {
     }
 }
 
+/**
+ * auto color: a game as white, then a new game as black (the app flips the board). the tracker must see the new game
+ * by itself, turn the board around and know you are black now. then back to white again
+ */
+fun sideSwitch() {
+    println("== new game with the other color (auto color)")
+    val tr = Tracker(true, true)
+    tr.autoColor = true
+    var truth = Board()
+    var ph = Phone(tr, Scene(looks[0], 1189, 2576, 78, 918, 1032, true, Random(21)))
+    ph.look(render(ph.sc, truth, null, null))
+    for (u in "e2e4 e7e5 g1f3 b8c6".split(" ")) {
+        val mv = playMove(truth, u)
+        ph.look(render(ph.sc, truth, mv.from.ordinal, mv.to.ordinal))
+    }
+    check(tr.meWhite(), "first game: you should be white")
+    for ((round, white) in listOf(false, true, false).withIndex()) {
+        truth = Board()
+        ph = Phone(tr, Scene(looks[round % looks.size], 1189, 2576, 78, 918, 1032, white, Random(22L + round)))
+        val st = ph.look(render(ph.sc, truth, null, null))
+        check(st == Tracker.Step.STARTED, "new game ($round) should start a new game (was $st)")
+        check(tr.whiteBottom == white && tr.meWhite() == white, "new game ($round): you should be ${if (white) "white" else "black"} (whiteBottom=${tr.whiteBottom})")
+        for (u in "d2d4 g8f6 c2c4 e7e6".split(" ")) {
+            val mv = playMove(truth, u)
+            ph.look(render(ph.sc, truth, mv.from.ordinal, mv.to.ordinal))
+            check(samePosition(tr, truth), "new game ($round) after $u\n    truth   ${truth.fen}\n    tracker ${tr.board?.fen}")
+        }
+        println("  game ${round + 2}: ${if (white) "white" else "black"} at the bottom -> you are ${if (tr.meWhite()) "white" else "black"} ok")
+    }
+    // knights out and back: the start position again, but it is the same game, not a new one
+    truth = Board()
+    ph = Phone(tr, Scene(looks[0], 1189, 2576, 78, 918, 1032, true, Random(30)))
+    ph.look(render(ph.sc, truth, null, null))
+    val epoch = tr.logEpoch
+    for (u in "g1f3 g8f6 f3g1 f6g8".split(" ")) {
+        val mv = playMove(truth, u)
+        ph.look(render(ph.sc, truth, mv.from.ordinal, mv.to.ordinal))
+    }
+    check(tr.logEpoch == epoch && tr.playedMoves.size == 4, "knights back home is not a new game (epoch ${tr.logEpoch} vs $epoch, moves ${tr.playedMoves.size})")
+    println("  knights back home: still the same game ok")
+}
+
 /** the lost-track case: the misread queen moves like a knight before we had a second look */
 fun promoLost() {
     println("== misread promotion, then the piece moves")
@@ -537,6 +579,7 @@ fun main(args: Array<String>) {
     special(sf)
     promoRecheck()
     promoLost()
+    sideSwitch()
     midGame()
     println("== simulated games")
     var seed = 100L

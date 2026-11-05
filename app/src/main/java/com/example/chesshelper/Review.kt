@@ -90,6 +90,23 @@ object Labeler {
         return maxOf(0.0, ep(p.bestScore, rating) - ep(p.afterScore, rating))
     }
 
+    /** how many expected points a move with this score gives away compared to the best one (same side's view) */
+    fun lossOf(best: Int, score: Int, rating: Int): Double = maxOf(0.0, ep(best, rating) - ep(score, rating))
+
+    /**
+     * the blunder alert: the squares where every one of your moves that goes there is a blunder.
+     * moves = every legal move (like e2e4) with its score from your side, or null if the engine didn't score it
+     * (then that square is left alone: we don't know). best = the best score
+     */
+    fun blunderSquares(best: Int, moves: List<Pair<String, Int?>>, rating: Int): List<String> {
+        val out = ArrayList<String>()
+        for ((sq, list) in moves.groupBy { it.first.substring(2, 4) }) {
+            val allBad = list.all { (_, s) -> s != null && lossOf(best, s, rating) > MISTAKE_MAX }
+            if (allBad) out.add(sq)
+        }
+        return out.sorted()
+    }
+
     fun label(p: PlyInput, rating: Int = 1500): Label {
         if (p.isBook) return Label.BOOK
         val epBest = ep(p.bestScore, rating)

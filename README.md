@@ -26,6 +26,7 @@ github builds it for you. open the Actions tab and wait for the build (about 5 t
 - **live accuracy**: "you 87% · bot 72%" on the card, lichess style. each move is scored by how much it dropped the mover's winning chances. moves the app missed (two moves at once) are skipped
 - **move labels**: every move that was just played (yours and the bot's) gets a small badge on the square it went to: brilliant, great, best, excellent, good, book, inaccuracy, mistake, miss or blunder. brilliant and great glow blue with a shimmer. it is analysis only and never changes which moves are suggested. each label costs about half a second of stockfish. the "move labels" switch turns it off, and the rating used to judge comes from the review screen
 - **premove**: the card lists your answer to each of the 3 guesses ("you: e5"), and the answer to the most likely one is drawn on the board as a dashed arrow with a "P". if the bot plays a guess, your real suggestion shows at once. the "premove" switch turns it off
+- **blunder alert**: on your turn, after the suggestions show up, every square where any move of yours would be a blunder turns dark red with a skull (one extra stockfish search that scores every legal move). and when a move that was just played is a blunder (yours or the bot's), its square gets a big skull that drops in and shakes. turn it off with "blunder alert"
 - **match history**: every game the helper follows is saved by itself: result, your side, accuracy, opening, date. open it from the app ("match history"). tap a game to review it. the board only shows checkmate and stalemate, so hold a game to set the result yourself after a resign or a loss on time (or to delete it)
 - **pause**: hides everything and stops reading the screen until you resume
 
@@ -53,6 +54,7 @@ the opening book is `app/src/main/assets/openings.tsv`. rebuild it with `tools/b
 
 ## reading the board
 
+- a new game is seen by itself as soon as the start position shows up, either way up. the way the board faces tells your side, so a game as black right after a game as white needs nothing (with "i play: auto")
 - if you (or the bot) move while the helper is still drawing, it notices and reads the board again right away, so the suggestions don't get stuck on the bot's turn
 - a promoted piece is looked at a few more times after the promotion (the first look can catch the piece picker or the animation). if it was misread, it is fixed by itself, also when the piece already moved
 

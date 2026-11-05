@@ -68,6 +68,18 @@ object ReviewTest {
         check(l(ply(sac = true, bestScore = 29990, second = 29950, after = null)) != Label.BRILLIANT, "no brilliant when a quiet move mates too")
         check(l(ply(played = "d2d4", bestScore = 100, after = -29990)) == Label.BLUNDER, "walking into a mate is a blunder")
 
+        // --- the blunder alert: squares where every move of yours that goes there blunders
+        val sqs = Labeler.blunderSquares(50, listOf(
+            Pair("d3e4", -400), Pair("f3e4", -350),        // both moves to e4 lose a lot
+            Pair("c4d5", -400), Pair("e4d5", 40),          // one move to d5 is fine
+            Pair("h4g5", null),                            // not scored: leave it alone
+            Pair("a2a3", 45), Pair("b1c3", 30),            // fine moves
+            Pair("h2h3", -29990)                           // walks into a mate
+        ), 1500)
+        check(sqs == listOf("e4", "h3"), "blunder squares: $sqs")
+        check(Labeler.blunderSquares(-29990, listOf(Pair("a2a3", -29990), Pair("b2b3", -29990)), 1500).isEmpty(), "already mated anyway: nothing to warn about")
+        check(Labeler.blunderSquares(700, listOf(Pair("a2a3", 450)), 600).isEmpty(), "a small slip in a won game is no blunder at 600")
+
         // --- the curve is kinder to lower rated players
         val slip = ply(played = "d2d4", bestScore = 150, after = 90)
         check(Labeler.label(slip, 2500) == Label.INACCURACY, "2500: a 60 cp drop at +1.5 is an inaccuracy")

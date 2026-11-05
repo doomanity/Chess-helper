@@ -101,6 +101,22 @@ class Replayed(
     val note: String?
 )
 
+/** the blunder alert on your turn: which squares your pieces should not go to */
+object Danger {
+    /** looks at every legal move (one search with all of them listed) and returns the squares where all moves blunder */
+    fun squares(engine: UciEngine, fen: String, ms: Int, rating: Int): List<String> {
+        val b = Board()
+        b.loadFromFen(fen)
+        val legal = b.legalMoves().map { it.toString() }
+        if (legal.size < 2) return emptyList()
+        val lines = engine.analyse(fen, ms, minOf(legal.size, 64))
+        val best = lines.firstOrNull()?.score ?: return emptyList()
+        val score = HashMap<String, Int>()
+        for (l in lines) score[l.move] = l.score
+        return Labeler.blunderSquares(best, legal.map { Pair(it, score[it]) }, rating)
+    }
+}
+
 /**
  * Reviews a finished (or still running) game with stockfish at full power: looks at every position, labels every
  * move chess.com style and scores it. Analysis only: nothing here picks a move for anybody.

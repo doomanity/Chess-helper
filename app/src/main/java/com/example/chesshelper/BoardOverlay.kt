@@ -48,11 +48,17 @@ class OverlayModel(
     val accuracy: String? = null,     // like "you 87% · bot 72%"
     val guesses: List<GuessDraw> = emptyList(), // the bot's likely next moves, most likely first (shown while it thinks)
     val preFrom: RectF? = null,       // your answer to the most likely guess, ready before the bot moves (a premove)
-    val preTo: RectF? = null
+    val preTo: RectF? = null,
+    val danger: List<RectF> = emptyList() // blunder alert: squares where every move of yours that goes there blunders
 ) {
     /** the same picture with new guesses (answers filled in) and the premove */
     fun withGuesses(gs: List<GuessDraw>, from: RectF?, to: RectF?) = OverlayModel(
-        moves, board, whiteBottom, evalShare, evalText, threatFrom, threatTo, line, title, accuracy, gs, from, to
+        moves, board, whiteBottom, evalShare, evalText, threatFrom, threatTo, line, title, accuracy, gs, from, to, danger
+    )
+
+    /** the same picture with the blunder alert squares */
+    fun withDanger(sq: List<RectF>) = OverlayModel(
+        moves, board, whiteBottom, evalShare, evalText, threatFrom, threatTo, line, title, accuracy, guesses, preFrom, preTo, sq
     )
 }
 
@@ -187,6 +193,8 @@ class BoardOverlay(ctx: Context) : View(ctx) {
             }
 
             if (m.evalShare != null) drawEvalBar(canvas, m, screenW)
+            // the blunder alert squares first, so the suggested moves are drawn over them
+            for (r in m.danger) Doom.danger(canvas, r)
             for (s in m.line) drawLineStep(canvas, s)
             if (m.threatFrom != null && m.threatTo != null) drawThreat(canvas, m.threatFrom, m.threatTo)
             // the less likely guesses first, so the most likely one is drawn on top
@@ -427,6 +435,7 @@ class BoardOverlay(ctx: Context) : View(ctx) {
         val t = (SystemClock.uptimeMillis() - badgeStart) / 1000f
         var moving = false
         if (lab.glows && look.anim) moving = Enchant.draw(c, b.rect, lab, t, null, loop = false)
+        if (lab == Label.BLUNDER) moving = Doom.landed(c, b.rect, t, look.anim)
 
         val pop = ease(t / 0.22f)
         val r = sq * 0.2f * (0.4f + 0.6f * pop)

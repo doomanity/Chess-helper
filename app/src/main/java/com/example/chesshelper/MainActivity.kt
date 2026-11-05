@@ -93,6 +93,7 @@ class MainActivity : Activity() {
         g.add(ui.toggleRow("threat", c.showThreat, "what the opponent wants to do") { on -> save { it.putBoolean("show_threat", on) } })
         g.add(ui.toggleRow("best line", c.showLine, "the next few moves of the best line") { on -> save { it.putBoolean("show_line", on) } })
         g.add(ui.toggleRow("live accuracy", c.showAcc) { on -> save { it.putBoolean("show_acc", on) } })
+        g.add(ui.toggleRow("blunder alert", c.blunderSquares, "dark red skull on squares where any move of yours would blunder") { on -> save { it.putBoolean("blunder_squares", on) } })
 
         // ---- while the bot thinks
         g = ui.group(root, "while the bot thinks", "the premove is your answer to the bot's likely move, ready before it plays")

@@ -461,6 +461,7 @@ class SideBar(private val ctx: Context, private val wm: WindowManager, private v
         g.add(ui.toggleRow("threat", cfg.showThreat) { on -> save { it.putBoolean("show_threat", on) } })
         g.add(ui.toggleRow("best line", cfg.showLine) { on -> save { it.putBoolean("show_line", on) } })
         g.add(ui.toggleRow("accuracy", cfg.showAcc) { on -> save { it.putBoolean("show_acc", on) } })
+        g.add(ui.toggleRow("blunder alert", cfg.blunderSquares) { on -> save { it.putBoolean("blunder_squares", on) } })
         g.add(ui.toggleRow("guess the bot's move", cfg.predict) { on -> save { it.putBoolean("predict", on) } })
         g.add(ui.toggleRow("premove", cfg.premove) { on -> save { it.putBoolean("premove", on) } })
         g.add(ui.toggleRow("move labels", cfg.showLabels) { on -> save { it.putBoolean("show_labels", on) } })
