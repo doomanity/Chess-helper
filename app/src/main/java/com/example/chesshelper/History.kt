@@ -7,6 +7,9 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
 
+/** one of your standout moves in a game: a brilliant or great one. ply = which move of the game (1 = the first) */
+class Highlight(val ply: Int, val san: String, val label: String)
+
 /**
  * one game in the match history. result: "win", "loss", "draw" or "" (unknown: the board can't show a resign or a
  * loss on time). manual: the result you set yourself (wins over the one read from the board)
@@ -23,17 +26,36 @@ class SavedGame(
     val opening: String?,
     val updated: Long,
     val engine: String,
-    val manual: String = ""
+    val manual: String = "",
+    val labels: Map<String, Int> = emptyMap(),   // how many of each label your moves got (Label names, like BRILLIANT)
+    val highlights: List<Highlight> = emptyList(), // your brilliant and great moves
+    val reviewed: Boolean = false                  // labels from a full review (exact), not from the live labels
 ) {
     /** the result to show: yours if you set one, else the one the board showed */
     val shownResult: String get() = manual.ifEmpty { result }
+
+    val brilliants: Int get() = labels["BRILLIANT"] ?: 0
+    val greats: Int get() = labels["GREAT"] ?: 0
+
+    /** the move number of a ply (white's and black's move share a number) */
+    fun moveNumber(ply: Int): Int {
+        val blackFirst = startFen.split(" ").getOrNull(1) == "b"
+        return if (blackFirst) (ply + 2) / 2 else (ply + 1) / 2
+    }
 
     fun toJson(): JSONObject = JSONObject()
         .put("id", id).put("start", startFen).put("moves", moves.joinToString(" ")).put("white", meWhite)
         .put("result", result).put("how", how).put("accMe", accMe ?: -1).put("accOpp", accOpp ?: -1)
         .put("opening", opening ?: "").put("updated", updated).put("engine", engine).put("manual", manual)
+        .put("labels", JSONObject().also { j -> for ((k, v) in labels) j.put(k, v) })
+        .put("highlights", highlights.joinToString(";") { "${it.ply}|${it.san}|${it.label}" })
+        .put("reviewed", reviewed)
 
-    fun with(manual: String) = SavedGame(id, startFen, moves, meWhite, result, how, accMe, accOpp, opening, updated, engine, manual)
+    fun with(manual: String) = SavedGame(id, startFen, moves, meWhite, result, how, accMe, accOpp, opening, updated, engine,
+        manual, labels, highlights, reviewed)
+
+    fun withLabels(labels: Map<String, Int>, highlights: List<Highlight>, reviewed: Boolean) = SavedGame(id, startFen, moves,
+        meWhite, result, how, accMe, accOpp, opening, updated, engine, manual, labels, highlights, reviewed)
 
     companion object {
         fun fromJson(o: JSONObject) = SavedGame(
@@ -48,7 +70,21 @@ class SavedGame(
             opening = o.optString("opening").ifEmpty { null },
             updated = o.optLong("updated"),
             engine = o.optString("engine"),
-            manual = o.optString("manual")
+            manual = o.optString("manual"),
+            labels = o.optJSONObject("labels")?.let { j ->
+                val m = HashMap<String, Int>()
+                val it = j.keys()
+                while (it.hasNext()) {
+                    val k = it.next()
+                    m[k] = j.optInt(k)
+                }
+                m
+            } ?: emptyMap(),
+            highlights = o.optString("highlights").split(";").mapNotNull { h ->
+                val p = h.split("|")
+                if (p.size == 3) p[0].toIntOrNull()?.let { Highlight(it, p[1], p[2]) } else null
+            },
+            reviewed = o.optBoolean("reviewed", false)
         )
     }
 }
@@ -76,13 +112,29 @@ object GameHistory {
 
     fun get(ctx: Context, id: Long): SavedGame? = all(ctx).firstOrNull { it.id == id }
 
-    /** adds the game, or updates it (a result you set yourself is kept) */
+    /** adds the game, or updates it (a result you set yourself is kept, and so are labels from a full review) */
     @Synchronized
     fun put(ctx: Context, g: SavedGame) {
         val list = all(ctx).toMutableList()
         val i = list.indexOfFirst { it.id == g.id }
-        if (i >= 0) list[i] = g.with(list[i].manual) else list.add(0, g)
+        if (i >= 0) {
+            val old = list[i]
+            var n = g.with(old.manual)
+            if (old.reviewed) n = n.withLabels(old.labels, old.highlights, true)
+            list[i] = n
+        } else {
+            list.add(0, g)
+        }
         write(ctx, list)
+    }
+
+    /** the labels of your moves in a game. live labels never replace the exact ones from a full review */
+    @Synchronized
+    fun setLabels(ctx: Context, id: Long, labels: Map<String, Int>, highlights: List<Highlight>, reviewed: Boolean) {
+        val list = all(ctx)
+        val old = list.firstOrNull { it.id == id } ?: return
+        if (old.reviewed && !reviewed) return
+        write(ctx, list.map { if (it.id == id) it.withLabels(labels, highlights, reviewed) else it })
     }
 
     @Synchronized

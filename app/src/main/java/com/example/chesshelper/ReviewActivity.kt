@@ -68,11 +68,35 @@ class ReviewActivity : Activity() {
         build()
         if (intent?.getBooleanExtra("live", false) == true) startLive()
         val hid = intent?.getLongExtra("history_id", 0L) ?: 0L
-        if (hid != 0L) openSaved(hid)
+        if (hid != 0L) openSaved(hid, intent?.getIntExtra("goto_ply", -1) ?: -1)
     }
 
-    /** a game from the match history */
-    private fun openSaved(id: Long) {
+    // a game from the match history: when its review is done, the exact labels go back into the history
+    private var historyId = 0L
+    private var historyMeWhite = true
+    private var savedJob = -1
+
+    private fun saveLabels(id: Int, res: ReviewResult) {
+        if (historyId == 0L || savedJob == id) return
+        savedJob = id
+        val counts = HashMap<String, Int>()
+        val hl = ArrayList<Highlight>()
+        for ((i, m) in res.moves.withIndex()) {
+            if (m.moverWhite != historyMeWhite) continue
+            counts[m.label.name] = (counts[m.label.name] ?: 0) + 1
+            if (m.label == Label.BRILLIANT || m.label == Label.GREAT) hl.add(Highlight(i + 1, m.san, m.label.name))
+        }
+        val hid = historyId
+        Thread {
+            try {
+                GameHistory.setLabels(this, hid, counts, hl, reviewed = true)
+            } catch (e: Exception) {
+            }
+        }.start()
+    }
+
+    /** a game from the match history (startAt: the move to show, -1 = the end) */
+    private fun openSaved(id: Long, startAt: Int) {
         val g = GameHistory.get(this, id)
         if (g == null || g.moves.isEmpty()) {
             toast("that game is gone from the history")
@@ -81,7 +105,9 @@ class ReviewActivity : Activity() {
         live = false
         main.removeCallbacks(poll)
         board.flipped = !g.meWhite
-        submit(ReviewGame(g.startFen, g.moves), 0)
+        historyId = id
+        historyMeWhite = g.meWhite
+        submit(ReviewGame(g.startFen, g.moves), if (startAt >= 0) startAt else 0)
     }
 
     override fun onResume() {
@@ -328,6 +354,7 @@ class ReviewActivity : Activity() {
         for (i in cells.size until res.moves.size) addMoveCell(i, res.moves[i], res)
         rebuildSummary(res.moves)
         val total = res.fens.size - 1
+        if (res.moves.size >= total) saveLabels(id, res)
         val base = if (res.moves.size < total) "analyzing ${res.moves.size}/$total moves..." else "analysis done · $total moves"
         status.text = if (res.note != null) "$base · ${res.note}" else base
         // the move on the board just got its label (or the board has just been set up)

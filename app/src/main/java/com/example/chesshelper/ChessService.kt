@@ -114,6 +114,10 @@ class ChessService : Service(), SideBarHost, SharedPreferences.OnSharedPreferenc
     // the match history: which game the record belongs to
     private var histEpoch = -1
     private var histId = 0L
+    // the labels of your moves in this game (for the history: how many brilliant moves, and which)
+    private val gameLabels = HashMap<String, Int>()
+    private val gameHighlights = ArrayList<Highlight>()
+    private var pendingPly = 0
 
     // touch a piece: its safe squares. lastReads = the last clean read of the board (to see a square light up)
     private var lastReads: Array<SquareRead>? = null
@@ -630,6 +634,7 @@ class ChessService : Service(), SideBarHost, SharedPreferences.OnSharedPreferenc
             val last = tracker.playedMoves.lastOrNull()
             if (prevFen != null && last != null && step == Tracker.Step.MOVED && tracker.lastPlies == 1) {
                 pendingJudge = Pair(prevFen, last)
+                pendingPly = tracker.playedMoves.size
             } else {
                 pendingJudge = null
                 badgeCache = null
@@ -1009,6 +1014,16 @@ class ChessService : Service(), SideBarHost, SharedPreferences.OnSharedPreferenc
         } ?: return
         badgeCache = Pair(key, mv)
         applyBadge(mv, g, wb)
+        // your move: count its label for the match history
+        val tr = tracker ?: return
+        if (mv.moverWhite == tr.meWhite()) {
+            gameLabels[mv.label.name] = (gameLabels[mv.label.name] ?: 0) + 1
+            if (mv.label == Label.BRILLIANT || mv.label == Label.GREAT) gameHighlights.add(Highlight(pendingPly, mv.san, mv.label.name))
+            try {
+                GameHistory.setLabels(this, histId, HashMap(gameLabels), ArrayList(gameHighlights), reviewed = false)
+            } catch (e: Exception) {
+            }
+        }
     }
 
     private fun applyBadge(mv: ReviewedMove, g: BoardGeom, wb: Boolean) {
@@ -1041,6 +1056,8 @@ class ChessService : Service(), SideBarHost, SharedPreferences.OnSharedPreferenc
         if (tracker.logEpoch != histEpoch) {
             histEpoch = tracker.logEpoch
             histId = System.currentTimeMillis()
+            gameLabels.clear()
+            gameHighlights.clear()
         }
         val moves = tracker.playedMoves
         if (moves.size < 2) return
@@ -1051,7 +1068,7 @@ class ChessService : Service(), SideBarHost, SharedPreferences.OnSharedPreferenc
                 id = histId, startFen = tracker.startFen, moves = ArrayList(moves), meWhite = me,
                 result = result, how = how, accMe = accuracy.myScore, accOpp = accuracy.botScore,
                 opening = GameHistory.openingOf(tracker.startFen, moves, book), updated = System.currentTimeMillis(),
-                engine = engineName
+                engine = engineName, labels = HashMap(gameLabels), highlights = ArrayList(gameHighlights)
             ))
         } catch (e: Exception) {
             // the history is a nice extra: never let it stop the helper

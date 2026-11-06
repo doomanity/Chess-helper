@@ -20,6 +20,7 @@ import java.util.Locale
  */
 class HistoryActivity : Activity() {
     private lateinit var ui: Ios
+    private var onlyBrilliant = false   // the filter: all games, or only games with a brilliant move
     private val when_ = SimpleDateFormat("MMM d, HH:mm", Locale.US)
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -57,9 +58,86 @@ class HistoryActivity : Activity() {
         tiles.addView(tile(if (accs.isEmpty()) "-" else "${accs.average().toInt()}", "avg acc", ui.blue), ui.weight().apply { leftMargin = ui.dp(4f) })
         col.addView(tiles, ui.full(top = 16f))
 
-        val g = ui.group(col, "games", "tap a game to review it. hold it to set the result (resign, time) or delete it")
-        for (game in games) g.add(row(game))
+        // ---- brilliant moves: how many ever, and where
+        val bril = games.flatMap { gm -> gm.highlights.filter { it.label == "BRILLIANT" }.map { Pair(gm, it) } }
+        val totalBril = games.sumOf { it.brilliants }
+        val totalGreat = games.sumOf { it.greats }
+        val inGames = games.count { it.brilliants > 0 }
+        col.addView(brilliantCard(totalBril, inGames, totalGreat), ui.full(top = 10f))
+        if (bril.isNotEmpty()) {
+            val bg = ui.group(col, "your brilliant moves", "tap one to see it in the game review")
+            for ((gm, h) in bril.take(60)) bg.add(brilliantRow(gm, h))
+        }
+
+        // ---- the games
+        val shown = if (onlyBrilliant) games.filter { it.brilliants > 0 } else games
+        val g = ui.group(col, "games", "tap a game to review it (that also counts its labels exactly). hold it to set the result (resign, time) or delete it")
+        g.add(ui.segRow(null, listOf("all" to "all games", "bril" to "with a brilliant !!"), if (onlyBrilliant) "bril" else "all") { v ->
+            onlyBrilliant = v == "bril"
+            build()
+        })
+        if (shown.isEmpty()) g.add(ui.noteRow("no games with a brilliant move yet. keep going!"))
+        for (game in shown) g.add(row(game))
         setContentView(scroll)
+    }
+
+    /** the big teal card: your brilliant moves so far */
+    private fun brilliantCard(total: Int, inGames: Int, greats: Int): View {
+        val teal = Label.BRILLIANT.color
+        val box = LinearLayout(this)
+        box.orientation = LinearLayout.HORIZONTAL
+        box.gravity = Gravity.CENTER_VERTICAL
+        box.setPadding(ui.dp(16f), ui.dp(16f), ui.dp(16f), ui.dp(16f))
+        box.background = ui.round(ui.cell, 14f)
+        val icon = ui.text("!!", 22f, Color.WHITE, ui.bold)
+        icon.gravity = Gravity.CENTER
+        icon.background = ui.round(teal, 100f)
+        box.addView(icon, LinearLayout.LayoutParams(ui.dp(52f), ui.dp(52f)))
+        val texts = LinearLayout(this)
+        texts.orientation = LinearLayout.VERTICAL
+        texts.setPadding(ui.dp(14f), 0, 0, 0)
+        texts.addView(ui.text("$total brilliant ${if (total == 1) "move" else "moves"}", 22f, teal, ui.bold))
+        val sub = when {
+            total == 0 -> "none yet. live labels count them while you play"
+            else -> "in $inGames ${if (inGames == 1) "game" else "games"}"
+        } + if (greats > 0) " · $greats great" else ""
+        texts.addView(ui.text(sub, 14f, ui.label2).apply { setPadding(0, ui.dp(3f), 0, 0) })
+        box.addView(texts, ui.weight())
+        return box
+    }
+
+    /** one brilliant move: "!! Nf5", which move of which game, tap = review at that move */
+    private fun brilliantRow(game: SavedGame, h: Highlight): View {
+        val row = LinearLayout(this)
+        row.orientation = LinearLayout.HORIZONTAL
+        row.gravity = Gravity.CENTER_VERTICAL
+        row.setPadding(ui.dp(14f), ui.dp(10f), ui.dp(14f), ui.dp(10f))
+        row.background = ui.pressable(ColorDrawable(Color.TRANSPARENT), ColorDrawable(ui.pressed))
+        val b = ui.text("!!", 13f, Color.WHITE, ui.bold)
+        b.gravity = Gravity.CENTER
+        b.background = ui.round(Label.BRILLIANT.color, 100f)
+        row.addView(b, LinearLayout.LayoutParams(ui.dp(30f), ui.dp(30f)))
+        val texts = LinearLayout(this)
+        texts.orientation = LinearLayout.VERTICAL
+        texts.setPadding(ui.dp(12f), 0, ui.dp(8f), 0)
+        val n = game.moveNumber(h.ply)
+        val dots = if (game.meWhite) "." else "..."
+        texts.addView(ui.text("$n$dots ${h.san}", 16f, ui.label, ui.medium))
+        val parts = ArrayList<String>()
+        parts.add(game.opening ?: "game")
+        when (game.shownResult) {
+            "win" -> parts.add("won")
+            "loss" -> parts.add("lost")
+            "draw" -> parts.add("draw")
+        }
+        parts.add(when_.format(Date(game.id)))
+        texts.addView(ui.text(parts.joinToString(" · "), 13f, ui.label2).apply { maxLines = 1; setPadding(0, ui.dp(2f), 0, 0) })
+        row.addView(texts, ui.weight())
+        row.addView(ui.text("›", 22f, ui.label3, ui.medium))
+        row.setOnClickListener {
+            startActivity(Intent(this, ReviewActivity::class.java).putExtra("history_id", game.id).putExtra("goto_ply", h.ply))
+        }
+        return row
     }
 
     private fun tile(big: String, small: String, color: Int): View {
@@ -115,6 +193,11 @@ class HistoryActivity : Activity() {
         texts.addView(sub)
         row.addView(texts, ui.weight())
 
+        // a teal pill when the game has brilliant moves
+        if (game.brilliants > 0) {
+            row.addView(ui.pill("!! ${game.brilliants}", Label.BRILLIANT.color), LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply { rightMargin = ui.dp(6f) })
+        }
         row.addView(ui.text("›", 22f, ui.label3, ui.medium))
         row.setOnClickListener {
             startActivity(Intent(this, ReviewActivity::class.java).putExtra("history_id", game.id))
