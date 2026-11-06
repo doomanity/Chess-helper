@@ -50,18 +50,26 @@ class OverlayModel(
     val title: String = "",
     val accuracy: String? = null,     // like "you 87% · bot 72%"
     val guesses: List<GuessDraw> = emptyList(), // the bot's likely next moves, most likely first, each with your premove
-    val danger: List<RectF> = emptyList() // blunder alert: squares where every move of yours that goes there blunders
+    val danger: List<RectF> = emptyList(), // blunder alert: squares where every move of yours that goes there blunders
+    val hanging: List<RectF> = emptyList(), // your pieces the opponent can take for free (yellow ring)
+    val plan: List<LineStep> = emptyList(), // the bot's plan: its next moves if you did nothing
+    val alert: String? = null,         // a critical moment: shown on the card, which pulses
+    val alertColor: Int = 0
 ) {
-    /** the same picture with new guesses (answers filled in) */
-    fun withGuesses(gs: List<GuessDraw>) = OverlayModel(
-        moves, board, whiteBottom, evalShare, evalText, threatFrom, threatTo, line, title, accuracy, gs, danger
+    private fun copy(guesses: List<GuessDraw> = this.guesses, danger: List<RectF> = this.danger) = OverlayModel(
+        moves, board, whiteBottom, evalShare, evalText, threatFrom, threatTo, line, title, accuracy,
+        guesses, danger, hanging, plan, alert, alertColor
     )
 
+    /** the same picture with new guesses (answers filled in) */
+    fun withGuesses(gs: List<GuessDraw>) = copy(guesses = gs)
+
     /** the same picture with the blunder alert squares */
-    fun withDanger(sq: List<RectF>) = OverlayModel(
-        moves, board, whiteBottom, evalShare, evalText, threatFrom, threatTo, line, title, accuracy, guesses, sq
-    )
+    fun withDanger(sq: List<RectF>) = copy(danger = sq)
 }
+
+/** one square the touched piece can go to: safe (green) or where it gets taken (red) */
+class SafeMark(val rect: RectF, val safe: Boolean)
 
 /** the label of the move that was just played (brilliant, blunder...), drawn on the square it went to */
 class BadgeModel(val rect: RectF, val label: Label)
@@ -84,14 +92,24 @@ class OverlayLook(
 class BoardOverlay(ctx: Context) : View(ctx) {
     companion object {
         val PREDICT = Color.rgb(200, 206, 222) // the bot's guessed move: soft grey-white
+        const val ALERT_SECONDS = 2.2f
 
         /** guess 1, 2, 3 and the premove that answers it share a color (and a number) */
         val GUESS_COLORS = intArrayOf(Color.rgb(90, 200, 250), Color.rgb(255, 159, 10), Color.rgb(191, 90, 242))
         fun guessColor(i: Int) = GUESS_COLORS[i.coerceIn(0, GUESS_COLORS.size - 1)]
+
+        val HANG = Color.rgb(255, 214, 10)  // a hanging piece: yellow
+        val SAFE = Color.rgb(48, 209, 88)   // a safe square for the touched piece: green
+        val PLAN_COLORS = intArrayOf(Color.rgb(255, 69, 58), Color.rgb(255, 120, 60), Color.rgb(255, 170, 90)) // the bot's plan, 1 2 3
+
+        /** critical moment colors on the card */
+        val ALERT_CHANCE = Color.rgb(255, 204, 0)
+        val ALERT_ONLY = Color.rgb(255, 120, 40)
     }
 
     private var model: OverlayModel? = null
     private var badge: BadgeModel? = null
+    private var safety: List<SafeMark> = emptyList()
     private var badgeStart = 0L
     private var look = OverlayLook("neon", Color.rgb(0, 229, 255), true, 1f, 1f, 1f, 0.95f)
     private var start = 0L
@@ -150,10 +168,17 @@ class BoardOverlay(ctx: Context) : View(ctx) {
     }
 
     fun clearMove() {
-        if (model == null && badge == null) return
+        if (model == null && badge == null && safety.isEmpty()) return
         model?.evalShare?.let { lastShare = it }
         model = null
         badge = null
+        safety = emptyList()
+        invalidate()
+    }
+
+    /** the safe / unsafe squares of the piece you touched (empty list = take them away) */
+    fun setSafety(marks: List<SafeMark>) {
+        safety = marks
         invalidate()
     }
 
@@ -200,7 +225,9 @@ class BoardOverlay(ctx: Context) : View(ctx) {
             if (m.evalShare != null) drawEvalBar(canvas, m, screenW)
             // the blunder alert squares first, so the suggested moves are drawn over them
             for (r in m.danger) Doom.danger(canvas, r)
+            for (r in m.hanging) drawHanging(canvas, r)
             for (s in m.line) drawLineStep(canvas, s)
+            for (s in m.plan.reversed()) drawPlanStep(canvas, s)
             if (m.threatFrom != null && m.threatTo != null) drawThreat(canvas, m.threatFrom, m.threatTo)
             // the less likely guesses first, so the most likely one is drawn on top
             for (i in m.guesses.indices.reversed()) drawPrediction(canvas, m.guesses[i], i)
@@ -209,6 +236,7 @@ class BoardOverlay(ctx: Context) : View(ctx) {
             for (mv in m.moves.sortedByDescending { it.rank }) drawMove(canvas, mv)
             if (m.moves.isNotEmpty() || m.guesses.isNotEmpty()) drawCard(canvas, m, screenW)
         }
+        for (mk in safety) drawSafeMark(canvas, mk)
         badge?.let { drawLabelBadge(canvas, it) }
         if (debug.isNotEmpty()) canvas.drawText(debug, screenW / 2f, (height + where[1]) - 36f * d, debugPaint)
     }
@@ -379,6 +407,72 @@ class BoardOverlay(ctx: Context) : View(ctx) {
         }
     }
 
+    /** one of your pieces that hangs: a yellow ring around it with a small "!" */
+    private fun drawHanging(c: Canvas, r: RectF) {
+        val sq = r.width()
+        stroke.color = Theme.withAlpha(HANG, (235 * drawP).toInt())
+        stroke.strokeWidth = sq * 0.065f
+        c.drawCircle(r.centerX(), r.centerY(), sq * 0.42f, stroke)
+        val br = sq * 0.13f * drawP
+        if (br > 1f) {
+            val bx = r.right - sq * 0.17f
+            val by = r.bottom - sq * 0.17f
+            fill.color = HANG
+            c.drawCircle(bx, by, br, fill)
+            text.textSize = br * 1.5f
+            text.textAlign = Paint.Align.CENTER
+            text.isFakeBoldText = true
+            text.color = Color.rgb(30, 24, 0)
+            c.drawText("!", bx, by + br * 0.52f, text)
+            text.isFakeBoldText = false
+            text.color = Color.WHITE
+        }
+    }
+
+    /** one step of the bot's plan: a thin dashed red-orange arrow with its number */
+    private fun drawPlanStep(c: Canvas, s: LineStep) {
+        val sq = s.to.width()
+        val col = PLAN_COLORS[(s.n - 1).coerceIn(0, PLAN_COLORS.size - 1)]
+        arrow(c, s.from, s.to, col, sq * 0.05f * look.arrowSize, if (s.n == 1) 0.75f else 0.55f, true)
+        val r = sq * 0.12f * drawP
+        if (r > 1f) {
+            val bx = s.to.right - sq * 0.17f
+            val by = s.to.bottom - sq * 0.17f
+            fill.color = Color.argb(210, 20, 10, 10)
+            c.drawCircle(bx, by, r * 1.15f, fill)
+            stroke.color = col
+            stroke.strokeWidth = r * 0.2f
+            c.drawCircle(bx, by, r, stroke)
+            text.textSize = r * 1.15f
+            text.textAlign = Paint.Align.CENTER
+            text.color = col
+            text.isFakeBoldText = true
+            c.drawText("${s.n}", bx, by + r * 0.42f, text)
+            text.isFakeBoldText = false
+            text.color = Color.WHITE
+        }
+    }
+
+    /** a square the touched piece can go to: a green dot (safe) or a red dot with an x (it gets taken there) */
+    private fun drawSafeMark(c: Canvas, mk: SafeMark) {
+        val sq = mk.rect.width()
+        val cx = mk.rect.centerX()
+        val cy = mk.rect.centerY()
+        val r = sq * 0.2f
+        fill.color = Color.argb(150, 0, 0, 0)
+        c.drawCircle(cx, cy, r * 1.18f, fill)
+        fill.color = if (mk.safe) SAFE else Theme.THREAT
+        c.drawCircle(cx, cy, r, fill)
+        if (!mk.safe) {
+            stroke.color = Color.WHITE
+            stroke.strokeWidth = r * 0.28f
+            stroke.strokeCap = Paint.Cap.ROUND
+            val k = r * 0.45f
+            c.drawLine(cx - k, cy - k, cx + k, cy + k, stroke)
+            c.drawLine(cx - k, cy + k, cx + k, cy - k, stroke)
+        }
+    }
+
     /**
      * one of the bot's likely next moves: a thin dashed arrow in its own color, with a tag at its end that says its
      * number and, with maia3, its odds (like "1 52%")
@@ -405,8 +499,8 @@ class BoardOverlay(ctx: Context) : View(ctx) {
     }
 
     /**
-     * your premoves: the answer to each guess, in that guess's color with its number on the square it goes to. when
-     * two guesses have the same answer, it is drawn once with both numbers (like "1·2")
+     * your premoves: the answer to each guess, in that guess's color with its number. when two guesses have the same
+     * answer, each still gets its own arrow: side by side on the same move, each in its own color
      */
     private fun drawPremoves(c: Canvas, guesses: List<GuessDraw>) {
         val groups = LinkedHashMap<String, MutableList<Int>>()
@@ -418,23 +512,43 @@ class BoardOverlay(ctx: Context) : View(ctx) {
         // the less likely first, so the most likely answer ends up on top
         for (ranks in groups.values.reversed()) {
             val g = guesses[ranks[0]]
-            drawPremove(c, g.ansFrom!!, g.ansTo!!, guessColor(ranks[0]), ranks.joinToString("·") { "${it + 1}" })
+            val from = g.ansFrom!!
+            val to = g.ansTo!!
+            val sq = to.width()
+            val dx = to.centerX() - from.centerX()
+            val dy = to.centerY() - from.centerY()
+            val len = maxOf(1f, hypot(dx, dy))
+            // sideways direction, to spread the arrows of one shared move
+            val px = -dy / len
+            val py = dx / len
+            val gap = sq * 0.2f
+            for ((j, rank) in ranks.withIndex().reversed()) {
+                val off = (j - (ranks.size - 1) / 2f) * gap
+                val f2 = RectF(from)
+                f2.offset(px * off, py * off)
+                val t2 = RectF(to)
+                t2.offset(px * off, py * off)
+                drawPremove(c, f2, t2, guessColor(rank), "${rank + 1}", tint = j == 0, badgeSlot = j, realTo = to)
+            }
         }
     }
 
-    private fun drawPremove(c: Canvas, from: RectF, to: RectF, col: Int, label: String) {
+    /** one premove arrow. badgeSlot: its number badge goes next to the others of the same move (realTo = the square) */
+    private fun drawPremove(c: Canvas, from: RectF, to: RectF, col: Int, label: String, tint: Boolean, badgeSlot: Int, realTo: RectF) {
         val sq = to.width()
-        fill.color = Theme.withAlpha(col, (55 * drawP).toInt())
-        c.drawRoundRect(to, sq * 0.12f, sq * 0.12f, fill)
-        arrow(c, from, to, col, sq * 0.085f * look.arrowSize, 0.8f, true)
-        val r = sq * 0.15f * drawP
+        if (tint) {
+            fill.color = Theme.withAlpha(col, (55 * drawP).toInt())
+            c.drawRoundRect(realTo, sq * 0.12f, sq * 0.12f, fill)
+        }
+        arrow(c, from, to, col, sq * 0.075f * look.arrowSize, 0.85f, true)
+        val r = sq * 0.14f * drawP
         if (r > 1f) {
-            text.textSize = r * (if (label.length > 1) 1.0f else 1.3f)
+            text.textSize = r * 1.3f
             text.textAlign = Paint.Align.CENTER
             text.isFakeBoldText = true
-            val w = maxOf(r * 2f, text.measureText(label) + r)
-            val bx = to.left + sq * 0.06f + w / 2f
-            val by = to.top + sq * 0.06f + r
+            val w = r * 2f
+            val bx = realTo.left + sq * 0.06f + w / 2f + badgeSlot * (w + sq * 0.03f)
+            val by = realTo.top + sq * 0.06f + r
             fill.color = Color.argb(150, 0, 0, 0)
             c.drawRoundRect(bx - w / 2f - 1.5f * d, by - r - 1.5f * d, bx + w / 2f + 1.5f * d, by + r + 1.5f * d, r + 1.5f * d, r + 1.5f * d, fill)
             fill.color = col
@@ -613,6 +727,18 @@ class BoardOverlay(ctx: Context) : View(ctx) {
         stroke.color = Color.argb((40 * drawP).toInt(), 255, 255, 255)
         stroke.strokeWidth = 0.8f * d
         c.drawRoundRect(rect, radius, radius, stroke)
+        if (m.alert != null) {
+            // a critical moment: the edge pulses a few times, then stays lit
+            val t = (SystemClock.uptimeMillis() - start) / 1000f
+            val pulse = if (look.anim && t < ALERT_SECONDS) 0.55f + 0.45f * kotlin.math.abs(sin(t * PI.toFloat() * 1.6f)) else 0.75f
+            stroke.color = Theme.withAlpha(m.alertColor, (90 * pulse * drawP).toInt())
+            stroke.strokeWidth = 7f * d * pulse
+            c.drawRoundRect(rect, radius, radius, stroke)
+            stroke.color = Theme.withAlpha(m.alertColor, (240 * drawP).toInt())
+            stroke.strokeWidth = 2f * d
+            c.drawRoundRect(rect, radius, radius, stroke)
+            if (look.anim && t < ALERT_SECONDS) postInvalidateOnAnimation()
+        }
 
         var y0 = rect.top + pad
         if (head > 0f) {
@@ -620,7 +746,15 @@ class BoardOverlay(ctx: Context) : View(ctx) {
             text.textAlign = Paint.Align.LEFT
             text.typeface = medium
             text.color = Color.argb(153, 235, 235, 245)
-            c.drawText(m.title, rect.left + pad + 4f * d, y0 + head * 0.62f, text)
+            if (m.alert != null) {
+                text.color = m.alertColor
+                text.isFakeBoldText = true
+                c.drawText(m.alert, rect.left + pad + 4f * d, y0 + head * 0.62f, text)
+                text.isFakeBoldText = false
+                text.color = Color.argb(153, 235, 235, 245)
+            } else {
+                c.drawText(m.title, rect.left + pad + 4f * d, y0 + head * 0.62f, text)
+            }
             m.accuracy?.let {
                 text.textAlign = Paint.Align.RIGHT
                 c.drawText(it, rect.right - pad - 4f * d, y0 + head * 0.62f, text)

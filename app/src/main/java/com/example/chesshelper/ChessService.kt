@@ -115,6 +115,16 @@ class ChessService : Service(), SideBarHost, SharedPreferences.OnSharedPreferenc
     private var histEpoch = -1
     private var histId = 0L
 
+    // touch a piece: its safe squares. lastReads = the last clean read of the board (to see a square light up)
+    private var lastReads: Array<SquareRead>? = null
+    private var myTurnShown = false
+    private var touchSq: String? = null
+    private var touchIdx = -1
+    private var touchMarks = IntArray(0)
+
+    // the score before the bot moved (white's view), to see a big chance after its move
+    private var botTurnEval: Int? = null
+
     @Volatile private var dropOnResume = false
     private var settleAt = 0L // when what we last drew is fully on the screen
     private var forcedClear = false
@@ -463,6 +473,11 @@ class ChessService : Service(), SideBarHost, SharedPreferences.OnSharedPreferenc
                         if (!moving) {
                             // the first sign of a change. hint dots or a selected piece don't change the position
                             if (justCosmetic(f)) {
+                                // a piece touched (hint dots, a lit square): show where it is safe
+                                try {
+                                    watchTouch(f)
+                                } catch (e: Exception) {
+                                }
                                 Thread.sleep(POLL)
                                 continue
                             }
@@ -505,6 +520,7 @@ class ChessService : Service(), SideBarHost, SharedPreferences.OnSharedPreferenc
         val glowing = SystemClock.elapsedRealtime() < badgeNearUntil
         for (i in 0 until 64) {
             if (i in overlayCrossed) continue // our arrows pass over these, we can't read them now
+            if (i in touchMarks) continue // our safe / unsafe dots for the touched piece
             if (glowing && i in badgeNear) continue // the glow of a brilliant move spills over these
             if (i in overlaySquares) {
                 // under our highlight the color can look different, but a piece appearing or leaving is real
@@ -533,6 +549,8 @@ class ChessService : Service(), SideBarHost, SharedPreferences.OnSharedPreferenc
             return Tracker.Step.UNREADABLE
         }
         lastCls = cls
+        lastReads = reads
+        myTurnShown = false
         var step = tracker.update(cls, reads, now)
         if (step == Tracker.Step.STARTED) savesLeft = c.savesPerGame
 
@@ -645,7 +663,7 @@ class ChessService : Service(), SideBarHost, SharedPreferences.OnSharedPreferenc
                 else -> "thinking..."
             })
             val ms = if (mode == Mode.RETHINK) (c.thinkMs * 2.5f).toInt() else c.thinkMs
-            val a = adv.full(fen, c.nMoves, ms, threat = c.showThreat, maxPower = mode == Mode.SAVE)
+            val a = adv.full(fen, c.nMoves, ms, threat = c.showThreat || c.botPlan, maxPower = mode == Mode.SAVE)
             adv.listerError?.let { toast("maia3 pc not reachable ($it), using stockfish") }
             a
         }
@@ -673,7 +691,24 @@ class ChessService : Service(), SideBarHost, SharedPreferences.OnSharedPreferenc
                 line.add(LineStep(fr, to, i + 1, i % 2 == 1))
             }
         }
-        val th = advice.threat
+        val th = if (c.showThreat) advice.threat else null
+        val plan = ArrayList<LineStep>()
+        if (c.botPlan) {
+            for ((i, mv) in advice.plan.withIndex()) {
+                val fr = rect(mv.substring(0, 2)) ?: break
+                val to = rect(mv.substring(2, 4)) ?: break
+                plan.add(LineStep(fr, to, i + 1, false))
+            }
+        }
+        val hanging = if (c.hanging) {
+            try {
+                Safety.hanging(fen).mapNotNull { rect(it) }
+            } catch (e: Exception) {
+                emptyList()
+            }
+        } else emptyList()
+        val alert = criticalOf(advice, tracker.meWhite(), c)
+        botTurnEval = null
         val title = when {
             mode == Mode.SAVE -> "max power" + (if (savesLeft >= 0) " · $savesLeft left" else "")
             early != null -> "$engineName · ready early"
@@ -687,15 +722,110 @@ class ChessService : Service(), SideBarHost, SharedPreferences.OnSharedPreferenc
             threatTo = th?.let { rect(it.move.substring(2, 4)) },
             line = line,
             title = title,
-            accuracy = accText(c)
+            accuracy = accText(c),
+            hanging = hanging,
+            plan = plan,
+            alert = alert?.first,
+            alertColor = alert?.second ?: 0
         )
         say("best: " + advice.cands.joinToString("  ") { "${Game.san(fen, it.move)} ${it.text}" })
         shownFen = fen
         shownModel = model
         showModel(model)
+        myTurnShown = true
         runJudge(g, wb, fen, key, c)
         if (c.blunderSquares) showDanger(fen, model, g, wb, c)
         return step
+    }
+
+    /**
+     * a critical moment, from your side: a mate you can play, only one good move (every other move gives away a lot),
+     * or a big chance (the bot's last move threw a lot away). null when this move is a normal one
+     */
+    private fun criticalOf(advice: Advice, meWhite: Boolean, c: Cfg): Pair<String, Int>? {
+        if (!c.critical) return null
+        val best = advice.bestScore ?: return null
+        val rating = c.reviewRating
+        advice.mateWhite?.let { m -> if ((m > 0) == meWhite) return Pair("mate in ${kotlin.math.abs(m)}!", BoardOverlay.ALERT_CHANCE) }
+        val epBest = Labeler.ep(best, rating)
+        val second = advice.secondScore
+        if (second != null && epBest >= 0.3 && Labeler.lossOf(best, second, rating) >= 0.15) {
+            return Pair("only one good move!", BoardOverlay.ALERT_ONLY)
+        }
+        val before = botTurnEval
+        if (before != null) {
+            val beforeMe = if (meWhite) before else -before
+            if (epBest >= 0.6 && epBest - Labeler.ep(beforeMe, rating) >= 0.18) return Pair("big chance: the bot slipped!", BoardOverlay.ALERT_CHANCE)
+        }
+        return null
+    }
+
+    /**
+     * you touched a piece in the chess app (it shows hint dots and lights up the square): every square it can go to
+     * gets a green dot (safe) or a red one (the opponent wins it there). the piece is found from the lit square, or
+     * from the hint dots (the one piece of yours that can reach all of them)
+     */
+    private fun watchTouch(f: Frame) {
+        val c = cfg ?: return
+        if (!c.safeSquares || !myTurnShown) return
+        val tr = tracker ?: return
+        val b = tr.board ?: return
+        val wb = tr.whiteBottom ?: return
+        val clean = lastReads ?: return
+        val me = tr.meWhite()
+        if ((b.sideToMove == Side.WHITE) != me) return
+        val reads = BoardVision.readSquares(f.px, f.w, f.local)
+        fun nameOf(i: Int): String {
+            val file = if (wb) i % 8 else 7 - i % 8
+            val rank = if (wb) 7 - i / 8 else i / 8
+            return "${'a' + file}${'1' + rank}"
+        }
+        val busy = HashSet<Int>()
+        for (i in overlayCrossed) busy.add(i)
+        for (i in touchMarks) busy.add(i)
+        val myPieces = (0 until 64).filter { i ->
+            val p = b.getPiece(com.github.bhlangonijr.chesslib.Square.valueOf(nameOf(i).uppercase()))
+            p != com.github.bhlangonijr.chesslib.Piece.NONE && (p.pieceSide == Side.WHITE) == me
+        }
+        val lit = myPieces.filter { it !in busy && BoardVision.colorDist(reads[it].bg, clean[it].bg) > 30 }
+        val dots = (0 until 64).filter { reads[it].dot && it !in busy }.map { nameOf(it) }.toSet()
+        val fen = b.fen
+        var pick: Int? = if (lit.size == 1) lit[0] else null
+        if (pick == null && dots.isNotEmpty()) {
+            val fits = myPieces.filter { Safety.moveSquares(fen, nameOf(it)).containsAll(dots) }
+            pick = if (fits.size == 1) fits[0] else lit.firstOrNull { it in fits }
+        }
+        if (pick == null) {
+            // nothing touched now: take the dots away once the touched piece's square looks normal again
+            val ti = touchIdx
+            if (touchSq != null && (ti !in 0..63 || BoardVision.colorDist(reads[ti].bg, clean[ti].bg) <= 30)) clearTouch()
+            return
+        }
+        val from = nameOf(pick)
+        if (from == touchSq) return
+        val marks = Safety.targets(fen, from)
+        if (marks.isEmpty()) {
+            clearTouch()
+            return
+        }
+        val list = ArrayList<SafeMark>()
+        val idx = ArrayList<Int>()
+        for ((sq, safe) in marks) {
+            val r = squareRect(f.abs, wb, sq) ?: continue
+            list.add(SafeMark(r, safe))
+            idx.add(screenIndexOf(r.centerX(), r.centerY(), f.abs))
+        }
+        touchSq = from
+        touchIdx = pick
+        touchMarks = idx.toIntArray()
+        main.post { overlay?.setSafety(list) }
+    }
+
+    private fun clearTouch() {
+        touchSq = null
+        touchIdx = -1
+        touchMarks = IntArray(0)
+        main.post { overlay?.setSafety(emptyList()) }
     }
 
     /**
@@ -760,6 +890,7 @@ class ChessService : Service(), SideBarHost, SharedPreferences.OnSharedPreferenc
         val whiteToMove = fen.split(" ").getOrNull(1) != "b"
         val evalWhite = if (whiteToMove) top.score else -top.score
         noteEval(key, evalWhite)
+        botTurnEval = evalWhite
         if (!c.predict) {
             runJudge(g, wb, fen, key, c)
             return
@@ -808,7 +939,7 @@ class ChessService : Service(), SideBarHost, SharedPreferences.OnSharedPreferenc
             if (boardMoved()) return
             say("bot will likely play ${x.san} · getting your answer ready")
             val ms = if (i == 0) maxOf(300, (c.thinkMs * 0.6f).toInt()) else maxOf(250, (c.thinkMs * 0.4f).toInt())
-            val a = adv.full(x.after, c.nMoves, ms, threat = c.showThreat)
+            val a = adv.full(x.after, c.nMoves, ms, threat = c.showThreat || c.botPlan)
             if (adv.listerError != null || a.cands.isEmpty()) continue
             ready[Game.posKey(x.after)] = a
             if (!c.premove) continue
@@ -954,6 +1085,9 @@ class ChessService : Service(), SideBarHost, SharedPreferences.OnSharedPreferenc
         badgeNear = IntArray(0)
         badgeNearUntil = 0L
         badgeIdx = -1
+        touchSq = null
+        touchIdx = -1
+        touchMarks = IntArray(0)
         main.post { overlay?.clearMove() }
     }
 
@@ -986,6 +1120,7 @@ class ChessService : Service(), SideBarHost, SharedPreferences.OnSharedPreferenc
         for (s in m.line) pairs.add(Pair(s.from, s.to))
         if (m.threatFrom != null && m.threatTo != null) pairs.add(Pair(m.threatFrom, m.threatTo))
         for (gs in m.guesses) pairs.add(Pair(gs.from, gs.to))
+        for (s in m.plan) pairs.add(Pair(s.from, s.to))
         for ((a, b) in pairs) {
             ends.add(screenIndexOf(a.centerX(), a.centerY(), g))
             ends.add(screenIndexOf(b.centerX(), b.centerY(), g))
@@ -995,6 +1130,7 @@ class ChessService : Service(), SideBarHost, SharedPreferences.OnSharedPreferenc
             }
         }
         if (badgeIdx >= 0) ends.add(badgeIdx)
+        for (r in m.hanging) ends.add(screenIndexOf(r.centerX(), r.centerY(), g))
         // the blunder alert squares are covered by a skull: the reader leaves them alone (your moves always start
         // on a square of your own, which is never one of them, so a move is still seen)
         for (r in m.danger) crossed.add(screenIndexOf(r.centerX(), r.centerY(), g))

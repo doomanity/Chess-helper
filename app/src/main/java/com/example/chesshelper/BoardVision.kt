@@ -12,7 +12,7 @@ class BoardGeom(val left: Int, val top: Int, val size: Int) {
  * what we see on one square: is a piece on it, how bright is it, and its shape (mask, 24x24 bits: which spots
  * differ from the empty square). hint dots that apps draw for possible moves are not pieces (dot = true).
  */
-class SquareRead(val occupied: Boolean, val tone: Int, val fill: Float, val mask: LongArray? = null, val dot: Boolean = false)
+class SquareRead(val occupied: Boolean, val tone: Int, val fill: Float, val mask: LongArray? = null, val dot: Boolean = false, val bg: Int = 0)
 
 /**
  * Finds the chessboard in a screenshot and tells which squares have a piece and what color it is.
@@ -29,6 +29,9 @@ object BoardVision {
     private fun blue(p: Int) = p and 0xFF
     private fun rgb(r: Int, g: Int, b: Int) = (r shl 16) or (g shl 8) or b
     private fun dist(a: Int, b: Int) = abs(red(a) - red(b)) + abs(green(a) - green(b)) + abs(blue(a) - blue(b))
+
+    /** how different two colors are (0 = the same). a square that got highlighted is more than 30 off */
+    fun colorDist(a: Int, b: Int) = dist(a, b)
     private fun luma(p: Int) = (red(p) * 299 + green(p) * 587 + blue(p) * 114) / 1000
 
     // ------------------------------------------------------------------ finding the board
@@ -369,7 +372,7 @@ object BoardVision {
                     }
                 }
             }
-            out[r * 8 + c] = SquareRead(occupied, tone, fill, mask, dot)
+            out[r * 8 + c] = SquareRead(occupied, tone, fill, mask, dot, bg)
         }
         return out
     }

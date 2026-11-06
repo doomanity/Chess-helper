@@ -74,7 +74,10 @@ class Advice(
     val mateWhite: Int?,        // mate in N from white's side (negative: black mates), or null
     val threat: Threat?,        // the opponent's threat, if there is a real one
     val line: List<String>,     // the moves after the best move in the main line (opponent, us, opponent)
-    val lineFor: String = ""   // the best move that line starts with
+    val lineFor: String = "",   // the best move that line starts with
+    val bestScore: Int? = null, // the best move's score, side to move's view
+    val secondScore: Int? = null, // the second best move's score (null: only one legal move)
+    val plan: List<String> = emptyList() // the opponent's plan: their next moves if we passed (theirs only)
 ) {
     /** 0..1: how much of the eval bar is white */
     val whiteShare: Float

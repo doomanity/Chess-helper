@@ -94,6 +94,10 @@ class MainActivity : Activity() {
         g.add(ui.toggleRow("best line", c.showLine, "the next few moves of the best line") { on -> save { it.putBoolean("show_line", on) } })
         g.add(ui.toggleRow("live accuracy", c.showAcc) { on -> save { it.putBoolean("show_acc", on) } })
         g.add(ui.toggleRow("blunder alert", c.blunderSquares, "dark red skull on squares where any move of yours would blunder") { on -> save { it.putBoolean("blunder_squares", on) } })
+        g.add(ui.toggleRow("hanging pieces", c.hanging, "yellow ring on your pieces that can be taken for free") { on -> save { it.putBoolean("hanging", on) } })
+        g.add(ui.toggleRow("safe squares", c.safeSquares, "touch a piece: green = safe, red = it gets taken there") { on -> save { it.putBoolean("safe_squares", on) } })
+        g.add(ui.toggleRow("critical moments", c.critical, "the card lights up when only one move works or the bot slipped") { on -> save { it.putBoolean("critical", on) } })
+        g.add(ui.toggleRow("bot's plan", c.botPlan, "its next moves if you did nothing, numbered in red") { on -> save { it.putBoolean("bot_plan", on) } })
 
         // ---- while the bot thinks
         g = ui.group(root, "while the bot thinks", "the premove is your answer to the bot's likely move, ready before it plays")

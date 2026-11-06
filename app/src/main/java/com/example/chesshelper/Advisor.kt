@@ -27,11 +27,13 @@ class Advisor(private val sf: UciEngine, private val lister: MoveLister?) {
         val whiteToMove = fen.split(" ").getOrNull(1) != "b"
         val evalWhite = if (whiteToMove) top.score else -top.score
         val mateWhite = top.mate?.let { if (whiteToMove) it else -it }
-        val th = if (threat) threatOf(fen, top.score) else null
+        val (th, plan) = if (threat) threatAndPlan(fen, top.score) else Pair(null, emptyList())
         val line = top.pv.drop(1).take(3)
+        val second = lines.getOrNull(1)?.score
 
         if (maxPower) {
-            return Advice(listOf(Cand(top.move, top.score, top.mate, Grade.BEST, 1, star = true)), evalWhite, mateWhite, th, line, top.move)
+            return Advice(listOf(Cand(top.move, top.score, top.mate, Grade.BEST, 1, star = true)), evalWhite, mateWhite, th, line, top.move,
+                top.score, null, plan)
         }
 
         val picks = ArrayList<String>()
@@ -56,29 +58,37 @@ class Advisor(private val sf: UciEngine, private val lister: MoveLister?) {
             val loss = maxOf(0, best - l.score)
             out.add(Cand(mv, l.score, l.mate, Grade.of(loss), i + 1))
         }
-        return Advice(out, evalWhite, mateWhite, th, line, top.move)
+        return Advice(out, evalWhite, mateWhite, th, line, top.move, top.score, second, plan)
     }
 
     /**
      * what the opponent threatens: let them move twice in a row (we "pass") and see if they win something.
      * score = our current score (side to move). null when there is no real threat or we are in check
      */
-    fun threatOf(fen: String, score: Int, ms: Int = 300): Threat? {
+    fun threatOf(fen: String, score: Int, ms: Int = 300): Threat? = threatAndPlan(fen, score, ms).first
+
+    /**
+     * the threat (see threatOf) and the opponent's plan: their moves in the same "we pass" search, up to 3 of them
+     * (the line goes theirs, ours, theirs, ours, theirs: we keep theirs)
+     */
+    fun threatAndPlan(fen: String, score: Int, ms: Int = 300): Pair<Threat?, List<String>> {
+        val none = Pair<Threat?, List<String>>(null, emptyList())
         val parts = fen.split(" ").toMutableList()
-        if (parts.size < 4) return null
+        if (parts.size < 4) return none
         try {
             val b = Board()
             b.loadFromFen(fen)
-            if (b.isKingAttacked) return null // in check we can't pass
+            if (b.isKingAttacked) return none // in check we can't pass
         } catch (e: Exception) {
-            return null
+            return none
         }
         parts[1] = if (parts[1] == "w") "b" else "w"
         parts[3] = "-"
         val passed = parts.joinToString(" ")
-        val l = sf.analyse(passed, ms, 1).firstOrNull() ?: return null
+        val l = sf.analyse(passed, ms, 1).firstOrNull() ?: return none
+        val plan = l.pv.filterIndexed { i, _ -> i % 2 == 0 }.take(3)
         val gain = l.score + score // their score after our pass, compared to their score now (-score)
-        if (l.mate != null && l.mate > 0) return Threat(l.move, gain)
+        if (l.mate != null && l.mate > 0) return Pair(Threat(l.move, gain), plan)
         // moving twice is always worth a bit (a free tempo), so a plain developing move is no threat.
         // a capture of one of our pieces has to win something real, any other move (a fork...) a lot
         val capture = try {
@@ -89,7 +99,7 @@ class Advisor(private val sf: UciEngine, private val lister: MoveLister?) {
             false
         }
         val need = if (capture) THREAT_MIN else THREAT_BIG
-        return if (gain >= need) Threat(l.move, gain) else null
+        return Pair(if (gain >= need) Threat(l.move, gain) else null, plan)
     }
 
     companion object {

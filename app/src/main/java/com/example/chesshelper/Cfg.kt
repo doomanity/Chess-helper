@@ -20,7 +20,11 @@ class Cfg(p: SharedPreferences) {
     val predict = p.getBoolean("predict", true)                 // guess the bot's move while it thinks, get your answer ready
     val showAcc = p.getBoolean("show_acc", true)                // live accuracy for you and the bot
     val showLabels = p.getBoolean("show_labels", true)
-    val blunderSquares = p.getBoolean("blunder_squares", true) // on your turn, dark red skull squares where every move blunders          // label every move that was just played (brilliant, blunder...) on the board
+    val blunderSquares = p.getBoolean("blunder_squares", true) // on your turn, dark red skull squares where every move blunders
+    val hanging = p.getBoolean("hanging", true)                 // yellow ring on your pieces the opponent can take for free
+    val critical = p.getBoolean("critical", true)               // the card pulses when the move really matters
+    val botPlan = p.getBoolean("bot_plan", true)                // the bot's next moves if you did nothing, numbered
+    val safeSquares = p.getBoolean("safe_squares", true)        // touch a piece: green = safe square, red = it gets taken          // label every move that was just played (brilliant, blunder...) on the board
     val premove = p.getBoolean("premove", true)                 // while the bot thinks, also show your answer to its guessed move
     val reviewRating = p.getInt("review_rating", 1500)          // how the labels are judged (same setting as the review screen)
     val nMoves = p.getInt("n_moves", 3).coerceIn(1, 4)
