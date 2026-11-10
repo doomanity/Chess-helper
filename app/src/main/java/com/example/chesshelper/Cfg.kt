@@ -17,6 +17,7 @@ class Cfg(p: SharedPreferences) {
     val illusionTrap = p.getBoolean("illusion_trap", true)        // illusion picks traps for a player of the opponent's rating
     val illusionBrilliant = p.getBoolean("illusion_brilliant", true) // illusion hunts brilliant moves on your turn
     val illusionGuess = p.getBoolean("illusion_guess", true)      // illusion guesses the bot's move when maia3 is off
+    val controlButton = p.getBoolean("control_button", true)      // the floating play / stop button for engine control
     val needIllusion: Boolean get() = useIllusion || illusionBrilliant || (illusionGuess && !useMaia)
     val maiaHost = (p.getString("maia_host", "") ?: "").trim()
     val maiaModel = (p.getString("maia_model", "23m") ?: "23m").trim().ifEmpty { "23m" }

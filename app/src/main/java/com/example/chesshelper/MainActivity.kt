@@ -97,6 +97,15 @@ class MainActivity : Activity() {
         }
         g.add(ui.sliderRow("think time", 300, 2000, 100, c.thinkMs, { "$it ms" }) { v -> save { it.putInt("think_ms", v) } })
 
+        // ---- engine control
+        g = ui.group(root, "engine control", "the floating play button lets the engine play your moves by tapping the board. only against computer bots: chess sites ban accounts that do this against people. if android greys the switch out, open app info > ⋮ > allow restricted settings first")
+        g.add(ui.navRow("allow engine control", if (TapService.instance != null) "on" else "off") {
+            try {
+                startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
+            } catch (_: Exception) {}
+        })
+        g.add(ui.toggleRow("show the play button", c.controlButton) { on -> save { it.putBoolean("control_button", on) } })
+
         // ---- illusion's extra jobs (they work with any engine above)
         g = ui.group(root, "illusion", "your engine runs on the phone with its hand made eval for now (no trained net yet)")
         g.add(ui.toggleRow("brilliant hunter", c.illusionBrilliant, "teal !! arrow when a brilliant move is on the board") { on -> save { it.putBoolean("illusion_brilliant", on) } })

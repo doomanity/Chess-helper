@@ -13,7 +13,7 @@ android {
         targetSdk = 34
         // every build gets a bigger number (github's run number), so the phone installs it as an update
         versionCode = (System.getenv("GITHUB_RUN_NUMBER")?.toIntOrNull() ?: 0) + 100
-        versionName = "1.7"
+        versionName = "1.8"
         ndk { abiFilters += listOf("arm64-v8a") }
     }
 

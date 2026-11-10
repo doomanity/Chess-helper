@@ -46,6 +46,14 @@ class ChessService : Service(), SideBarHost, SharedPreferences.OnSharedPreferenc
     private var stockfish: UciEngine? = null
     private var remote: RemoteEngine? = null
     @Volatile private var illusion: IllusionEngine? = null
+
+    // engine control: the engine plays your moves by tapping the board (against computer bots)
+    @Volatile private var autoPlay = false
+    private var controlBtn: ControlButton? = null
+    private var autoFen: String? = null
+    private var autoTries = 0
+    private var shownBest: String? = null      // the move engine control plays in the position shown
+    @Volatile private var autoRetryAt = 0L
     private var worker: Thread? = null
     @Volatile private var running = false
 
@@ -217,6 +225,9 @@ class ChessService : Service(), SideBarHost, SharedPreferences.OnSharedPreferenc
             sb.show()
             sideBar = sb
         }
+        if (c.controlButton) {
+            controlBtn = ControlButton(this, wm) { toggleAuto() }.also { it.show() }
+        }
         Cfg.prefs(this).registerOnSharedPreferenceChangeListener(this)
     }
 
@@ -227,6 +238,17 @@ class ChessService : Service(), SideBarHost, SharedPreferences.OnSharedPreferenc
     override fun onSharedPreferenceChanged(p: SharedPreferences?, key: String?) {
         val c = Cfg.load(this)
         cfg = c
+        if (key == "ctl_x" || key == "ctl_y") return // the floating button was moved
+        if (key == "control_button") {
+            if (c.controlButton && controlBtn == null) {
+                controlBtn = ControlButton(this, wm) { toggleAuto() }.also { it.show(); it.playing = autoPlay }
+            } else if (!c.controlButton) {
+                stopAuto("engine control button hidden: you play")
+                controlBtn?.remove()
+                controlBtn = null
+            }
+            return
+        }
         if (key != null && key in Cfg.LOOK_KEYS) {
             overlay?.setLook(lookOf(c))
             lastModel?.let { if (overlayShown && !paused) overlay?.setModel(it) }
@@ -269,8 +291,83 @@ class ChessService : Service(), SideBarHost, SharedPreferences.OnSharedPreferenc
         }
     }
 
+    /** the floating button: give the engine control, or take it back */
+    private fun toggleAuto() {
+        if (!autoPlay && TapService.instance == null) {
+            toast("allow engine control first: settings > accessibility > chess helper engine control")
+            try {
+                startActivity(Intent(android.provider.Settings.ACTION_ACCESSIBILITY_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+            } catch (_: Exception) {}
+            return
+        }
+        autoPlay = !autoPlay
+        autoFen = null
+        autoTries = 0
+        controlBtn?.playing = autoPlay
+        toast(if (autoPlay) "engine plays your moves (vs computer bots only)" else "you play again")
+        if (autoPlay) {
+            prevThumb = null
+            wantRead = true
+        }
+    }
+
+    private fun stopAuto(why: String) {
+        if (!autoPlay) return
+        autoPlay = false
+        autoRetryAt = 0L
+        main.post {
+            controlBtn?.playing = false
+            toast(why)
+        }
+    }
+
+    /**
+     * engine control: plays mv by tapping its from square, then its to square (and the piece in the promotion
+     * picker: queen, knight, rook, bishop from the promotion square down). if the board doesn't change, it tries
+     * again a couple of times, then gives control back
+     */
+    private fun playForMe(mv: String, fen: String, g: BoardGeom, wb: Boolean) {
+        val svc = TapService.instance ?: return stopAuto("engine control is off in the phone's settings, you play again")
+        if (autoFen == fen) {
+            autoTries++
+            if (autoTries > 2) return stopAuto("engine control couldn't play $mv, you play again")
+        } else {
+            autoFen = fen
+            autoTries = 0
+        }
+        val fr = squareRect(g, wb, mv.substring(0, 2)) ?: return
+        val to = squareRect(g, wb, mv.substring(2, 4)) ?: return
+        // a short human-ish pause, and the chance to stop
+        Thread.sleep(250L + (Math.random() * 400).toLong())
+        if (!autoPlay || paused || boardMoved()) return
+        if (!tapAndWait(svc, fr.centerX(), fr.centerY())) return stopAuto("engine control tap failed, you play again")
+        Thread.sleep(140)
+        tapAndWait(svc, to.centerX(), to.centerY())
+        if (mv.length == 5) {
+            // the promotion picker opens on the promotion square: queen there, then knight, rook, bishop below it
+            Thread.sleep(450)
+            val k = "qnrb".indexOf(mv[4]).coerceAtLeast(0)
+            tapAndWait(svc, to.centerX(), to.centerY() + k * to.height())
+        }
+        autoRetryAt = SystemClock.elapsedRealtime() + 2500 // if nothing happened by then, look again
+    }
+
+    private fun tapAndWait(svc: TapService, x: Float, y: Float): Boolean {
+        val latch = java.util.concurrent.CountDownLatch(1)
+        var ok = false
+        main.post {
+            svc.tap(x, y) { r ->
+                ok = r
+                latch.countDown()
+            }
+        }
+        latch.await(1500, java.util.concurrent.TimeUnit.MILLISECONDS)
+        return ok
+    }
+
     override fun onPauseToggle() {
         paused = !paused
+        if (paused) stopAuto("paused: you play again")
         // forget everything drawn before: after a pause the screen may show another game, and an old picture
         // must never come back (the worker drops its cached drawings too, see dropDrawings)
         dropOnResume = true
@@ -467,6 +564,12 @@ class ChessService : Service(), SideBarHost, SharedPreferences.OnSharedPreferenc
                         recheckAt = 0L
                         wantRead = true
                     }
+                    if (autoPlay && autoRetryAt in 1..now) {
+                        // engine control tapped but the board didn't change: read again (it tries the move again)
+                        autoRetryAt = 0L
+                        prevThumb = null
+                        wantRead = true
+                    }
                     val f = look()
                     if (f == null) {
                         if (lostBoardSince == 0L) lostBoardSince = now
@@ -634,7 +737,10 @@ class ChessService : Service(), SideBarHost, SharedPreferences.OnSharedPreferenc
         } else if (!tracker.promoUnsure) {
             promoLooks = 0
         }
-        if (step == Tracker.Step.MOVED || step == Tracker.Step.STARTED || step == Tracker.Step.RESET) forcedReads = 0
+        if (step == Tracker.Step.MOVED || step == Tracker.Step.STARTED || step == Tracker.Step.RESET) {
+            forcedReads = 0
+            autoRetryAt = 0L // engine control's move went through
+        }
         val wb = tracker.whiteBottom ?: c.iAmWhite
         val fen = b.fen
         val key = Game.posKey(fen)
@@ -675,6 +781,11 @@ class ChessService : Service(), SideBarHost, SharedPreferences.OnSharedPreferenc
         val cached = shownModel
         if (mode == Mode.NORMAL && shownFen == fen && cached != null) {
             showModel(cached)
+            val best = shownBest
+            if (autoPlay && best != null) {
+                playForMe(best, fen, g, wb)
+                return step
+            }
             runJudge(g, wb, fen, key, c)
             return step
         }
@@ -761,10 +872,43 @@ class ChessService : Service(), SideBarHost, SharedPreferences.OnSharedPreferenc
         shownModel = model
         showModel(model)
         myTurnShown = true
+        shownBest = advice.cands.first().move
+        if (autoPlay) {
+            // engine control: play the engine's pick (the first move on the card) and leave the extras for later
+            playForMe(advice.cands.first().move, fen, g, wb)
+            return step
+        }
+        // the bot played a guessed move: its premove answer had no threat / plan search, add them now
+        var onScreen = model
+        if (early != null && (c.showThreat || c.botPlan)) onScreen = addThreatAndPlan(fen, model, early, g, wb, c, adv)
         runJudge(g, wb, fen, key, c)
-        val shownNow = if (c.illusionBrilliant) huntBrilliant(fen, model, advice, g, wb, c) else model
+        val shownNow = if (c.illusionBrilliant) huntBrilliant(fen, onScreen, advice, g, wb, c) else onScreen
         if (c.blunderSquares) showDanger(fen, shownNow, g, wb, c)
         return step
+    }
+
+    /** the threat and the bot's plan for a premove answer that was shown without them */
+    private fun addThreatAndPlan(fen: String, model: OverlayModel, a: Advice, g: BoardGeom, wb: Boolean, c: Cfg, adv: Advisor): OverlayModel {
+        val (th, planMoves) = try {
+            adv.threatAndPlan(fen, a.bestScore ?: 0)
+        } catch (e: Exception) {
+            return model
+        }
+        val thr = if (c.showThreat) th else null
+        val tf = thr?.let { squareRect(g, wb, it.move.substring(0, 2)) }
+        val tt = thr?.let { squareRect(g, wb, it.move.substring(2, 4)) }
+        val plan = ArrayList<LineStep>()
+        if (c.botPlan) for ((i, mv) in planMoves.withIndex()) {
+            val fr = squareRect(g, wb, mv.substring(0, 2)) ?: break
+            val to = squareRect(g, wb, mv.substring(2, 4)) ?: break
+            plan.add(LineStep(fr, to, i + 1, false))
+        }
+        if (tf == null && plan.isEmpty()) return model
+        if (lastModel !== model || boardMoved()) return model
+        val next = model.withThreatPlan(tf, tt, plan)
+        shownModel = next
+        showModel(next, restart = false)
+        return next
     }
 
     /**
@@ -1016,12 +1160,18 @@ class ChessService : Service(), SideBarHost, SharedPreferences.OnSharedPreferenc
         ready.clear()
         val adv = advisor
         var shown: OverlayModel = model
+        // premoves have to be quick: no threat / plan search here (that comes right after your move shows), and
+        // illusion gets a short think. a failed illusion pick just falls back to stockfish's moves
+        val ill = illusion
+        val illMs = ill?.thinkMs
+        ill?.thinkMs = PREMOVE_ILLUSION_MS
+        try {
         if (adv != null) for ((i, x) in gs.withIndex()) {
             if (boardMoved()) return
             say("bot will likely play ${x.san} · getting your answer ready")
-            val ms = if (i == 0) maxOf(300, (c.thinkMs * 0.6f).toInt()) else maxOf(250, (c.thinkMs * 0.4f).toInt())
-            val a = adv.full(x.after, c.nMoves, ms, threat = c.showThreat || c.botPlan)
-            if (adv.listerError != null || a.cands.isEmpty()) continue
+            val ms = if (i == 0) maxOf(300, (c.thinkMs * 0.5f).toInt()) else maxOf(250, (c.thinkMs * 0.35f).toInt())
+            val a = adv.full(x.after, c.nMoves, ms, threat = false)
+            if (a.cands.isEmpty()) continue
             ready[Game.posKey(x.after)] = a
             if (!c.premove) continue
             val best = a.cands.first()
@@ -1033,6 +1183,9 @@ class ChessService : Service(), SideBarHost, SharedPreferences.OnSharedPreferenc
             predModel = next
             shown = next
             showModel(next, restart = false, wait = false)
+        }
+        } finally {
+            if (ill != null && illMs != null) ill.thinkMs = illMs
         }
         settleLater()
         say("your answers are ready: " + gs.joinToString("  ") { it.san })
@@ -1330,6 +1483,7 @@ class ChessService : Service(), SideBarHost, SharedPreferences.OnSharedPreferenc
 
     companion object {
         const val GUESSES = 3 // how many of the bot's likely moves to show while it thinks
+        const val PREMOVE_ILLUSION_MS = 250 // illusion's think for one premove
         private const val POLL = 120L // ms between looks at the screen
     }
 
@@ -1338,6 +1492,7 @@ class ChessService : Service(), SideBarHost, SharedPreferences.OnSharedPreferenc
         worker?.interrupt()
         try { Cfg.prefs(this).unregisterOnSharedPreferenceChangeListener(this) } catch (_: Exception) {}
         sideBar?.remove()
+        controlBtn?.remove()
         try { overlay?.let { wm.removeView(it) } } catch (_: Exception) {}
         try { vdisplay?.release() } catch (_: Exception) {}
         try { projection?.stop() } catch (_: Exception) {}

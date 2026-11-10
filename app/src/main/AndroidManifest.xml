@@ -33,6 +33,19 @@
             android:exported="false" />
 
         <service
+            android:name=".TapService"
+            android:exported="true"
+            android:label="chess helper engine control"
+            android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">
+            <intent-filter>
+                <action android:name="android.accessibilityservice.AccessibilityService" />
+            </intent-filter>
+            <meta-data
+                android:name="android.accessibilityservice"
+                android:resource="@xml/tap_service" />
+        </service>
+
+        <service
             android:name=".ChessService"
             android:exported="false"
             android:foregroundServiceType="mediaProjection" />

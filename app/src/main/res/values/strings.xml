@@ -1,0 +1,4 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="tap_service_description">engine control for chess helper: when you press its play button, the helper taps the board squares to play the engine\'s move. it only taps, it does not read anything from other apps. use it against computer bots only.</string>
+</resources>

@@ -12,6 +12,7 @@ three engines: stockfish (on the phone, adjustable difficulty), maia3 (plays lik
 - **trap mode**: illusion's swindle mode, set to the opponent's rating: it picks moves that are good and likely to fool a player of that level
 - **brilliant hunter**: on your turn illusion (and stockfish's best move) are checked for a brilliant move, judged like the move labels. if there is one, a thick teal arrow with "!!" shows it and the card says "!! brilliant move: ..."
 - **guess the bot**: with maia3 off, illusion's move is the first of the 3 guesses
+- premoves are worked out quickly (illusion thinks 250 ms per premove, no threat search), and the threat and plan are added right after your move shows
 - it uses its hand made evaluation for now (no trained net loaded yet)
 
 ## get the apk
@@ -63,6 +64,14 @@ labels: brilliant `!!`, great `!`, best, excellent, good, book, inaccuracy `?!`,
 a brilliant or great move gets a minecraft style enchant on the board: a shock ring when it lands, the enchanted item glint sliding over the piece, enchanting table runes floating up and little sparkles (teal for brilliant, blue and violet for great). there is also an accuracy score for both sides, a count of every label, an eval graph (tap or drag it to jump to a move) and a list of all the moves. "depth" picks how long stockfish thinks per position (fast / normal / deep).
 
 the opening book is `app/src/main/assets/openings.tsv`. rebuild it with `tools/build_openings.py` (see the top of that file).
+
+## engine control (against computer bots only)
+
+a small round floating button: green play = you play, tap it and it turns red, now the engine plays your moves by tapping the board (from square, then to square, and the piece in the promotion picker). it plays the first move on the card, so the engine you picked decides (stockfish at your strength, maia3, or illusion). tap it again to take control back. pause also gives control back. if a move doesn't go through after a few tries, control comes back to you. drag the button anywhere.
+
+android only lets an accessibility service tap the screen, so allow it once: main screen > "allow engine control" > chess helper engine control > on. if the switch is greyed out (android does that for apps installed from a browser), open the app's info page > ⋮ (top right) > allow restricted settings, then try again. it only taps, it reads nothing from other apps.
+
+use it against computer bots only: chess.com and lichess ban accounts that let an engine play against people. to let illusion play people online the allowed way, use a lichess bot account.
 
 ## reading the board
 

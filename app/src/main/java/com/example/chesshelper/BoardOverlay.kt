@@ -66,6 +66,12 @@ class OverlayModel(
         guesses, danger, hanging, plan, alert, alertColor, brilFrom, brilTo
     )
 
+    /** the same picture with the threat and the bot's plan added */
+    fun withThreatPlan(from: RectF?, to: RectF?, steps: List<LineStep>) = OverlayModel(
+        moves, board, whiteBottom, evalShare, evalText, from ?: threatFrom, to ?: threatTo, line, title, accuracy,
+        guesses, danger, hanging, steps.ifEmpty { plan }, alert, alertColor, brilFrom, brilTo
+    )
+
     /** the same picture with the brilliant move the hunter found (the card says so, unless it shows a critical moment) */
     fun withBrilliant(from: RectF, to: RectF, san: String) =
         copy(brilFrom = from, brilTo = to, alert = alert ?: "!! brilliant move: $san", alertColor = if (alert != null) alertColor else Label.BRILLIANT.color)
