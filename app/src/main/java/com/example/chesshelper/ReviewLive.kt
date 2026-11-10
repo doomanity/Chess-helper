@@ -46,6 +46,12 @@ class LiveReview(engine: UciEngine, private val book: OpeningBook?) {
         return mv
     }
 
+    /** the label a move would get, without counting it in the game (the brilliant hunter asks this) */
+    fun peek(fen: String, uci: String, ms: Int, rating: Int): Label? {
+        val next = Game.after(fen, uci) ?: return null
+        return analyzer.judge(fen, uci, next, ms, rating, null, false, null).label
+    }
+
     /** the engine's best line for a position (the side to move's view). remembered, so asking twice is free */
     fun topLine(fen: String, ms: Int): Line? = analyzer.topLine(fen, ms)
 }

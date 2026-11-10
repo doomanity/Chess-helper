@@ -63,8 +63,14 @@ class MainActivity : Activity() {
         g.add(ui.toggleRow("my turn when i press start", c.myTurnAtStart) { on -> save { it.putBoolean("my_turn", on) } })
 
         // ---- engine
-        g = ui.group(root, "engine", if (c.useMaia) "maia3 runs on your pc, see the readme. if the pc can't be reached the app uses stockfish for that move" else null)
-        g.add(ui.segRow(null, listOf("stockfish" to "stockfish (phone)", "maia3" to "maia3 (pc)"), if (c.useMaia) "maia3" else "stockfish") { v ->
+        val engineNote = when {
+            c.useMaia -> "maia3 runs on your pc, see the readme. if the pc can't be reached the app uses stockfish for that move"
+            c.useIllusion -> "illusion is your own engine, running on the phone. its pick is tagged ✦ on the card (⚑ = a trap). stockfish still grades every move"
+            else -> null
+        }
+        g = ui.group(root, "engine", engineNote)
+        val engineNow = if (c.useMaia) "maia3" else if (c.useIllusion) "illusion" else "stockfish"
+        g.add(ui.segRow(null, listOf("stockfish" to "stockfish", "maia3" to "maia3 (pc)", "illusion" to "illusion"), engineNow) { v ->
             storeText()
             save { it.putString("engine", v) }
             root.post { rebuild() }
@@ -78,6 +84,11 @@ class MainActivity : Activity() {
             g.add(modelRow)
             g.add(ui.sliderRow("plays like", 600, 2600, 100, c.maiaElo, { "$it" }) { v -> save { it.putInt("maia_elo", v) } })
             g.add(ui.sliderRow("human-ness", 0, 100, 5, c.maiaHuman, { if (it == 0) "top pick" else "$it%" }) { v -> save { it.putInt("maia_human", v) } })
+        } else if (c.useIllusion) {
+            maiaHostBox = EditText(this).apply { setText(c.maiaHost) }
+            maiaModelBox = EditText(this).apply { setText(c.maiaModel) }
+            g.add(ui.toggleRow("trap mode", c.illusionTrap, "picks moves that fool a player of the opponent's rating") { on -> save { it.putBoolean("illusion_trap", on) } })
+            g.add(ui.sliderRow("opponent rating", 600, 2600, 100, c.maiaElo, { "$it" }) { v -> save { it.putInt("maia_elo", v) } })
         } else {
             maiaHostBox = EditText(this).apply { setText(c.maiaHost) }
             maiaModelBox = EditText(this).apply { setText(c.maiaModel) }
@@ -85,6 +96,11 @@ class MainActivity : Activity() {
                 { if (it >= UciEngine.MAX_ELO) "full power" else "elo $it" }) { v -> save { it.putInt("elo2", v) } })
         }
         g.add(ui.sliderRow("think time", 300, 2000, 100, c.thinkMs, { "$it ms" }) { v -> save { it.putInt("think_ms", v) } })
+
+        // ---- illusion's extra jobs (they work with any engine above)
+        g = ui.group(root, "illusion", "your engine runs on the phone with its hand made eval for now (no trained net yet)")
+        g.add(ui.toggleRow("brilliant hunter", c.illusionBrilliant, "teal !! arrow when a brilliant move is on the board") { on -> save { it.putBoolean("illusion_brilliant", on) } })
+        g.add(ui.toggleRow("guess the bot with illusion", c.illusionGuess, "its move is the first guess when maia3 is off") { on -> save { it.putBoolean("illusion_guess", on) } })
 
         // ---- on the board
         g = ui.group(root, "on the board", "dark green = best, light green = decent, yellow = ok, red skull = blunder")

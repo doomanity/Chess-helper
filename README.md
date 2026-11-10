@@ -4,7 +4,15 @@ android app: watches the chess board on your screen, asks stockfish for the best
 
 the board is tracked on the phone itself, a few times a second: it finds the board, sees which squares have white or black pieces, learns what each piece looks like from the starting position, and follows the game with the rules of chess. hint dots, highlights and check frames are ignored. claude haiku is only used once when you start from a position that isn't the normal start (or if the app gets completely lost), so it costs almost nothing.
 
-two engines: stockfish (on the phone, adjustable difficulty) or maia3 (plays like a human of the rating you pick, runs on your pc, see below).
+three engines: stockfish (on the phone, adjustable difficulty), maia3 (plays like a human of the rating you pick, runs on your pc, see below) or illusion (brody's own engine, github.com/doomanity/Illusion, built for the phone in the same github build).
+
+## illusion
+
+- **as your engine**: pick "illusion" in the engine picker. its pick is first on the card, tagged ✦ (or ⚑ when it is a trap), and stockfish fills the other moves. stockfish still grades every move, so the numbers always mean the same thing
+- **trap mode**: illusion's swindle mode, set to the opponent's rating: it picks moves that are good and likely to fool a player of that level
+- **brilliant hunter**: on your turn illusion (and stockfish's best move) are checked for a brilliant move, judged like the move labels. if there is one, a thick teal arrow with "!!" shows it and the card says "!! brilliant move: ..."
+- **guess the bot**: with maia3 off, illusion's move is the first of the 3 guesses
+- it uses its hand made evaluation for now (no trained net loaded yet)
 
 ## get the apk
 

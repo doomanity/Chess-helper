@@ -54,12 +54,21 @@ class OverlayModel(
     val hanging: List<RectF> = emptyList(), // your pieces the opponent can take for free (yellow ring)
     val plan: List<LineStep> = emptyList(), // the bot's plan: its next moves if you did nothing
     val alert: String? = null,         // a critical moment: shown on the card, which pulses
-    val alertColor: Int = 0
+    val alertColor: Int = 0,
+    val brilFrom: RectF? = null,       // the brilliant hunter found a brilliant move: a teal arrow with "!!"
+    val brilTo: RectF? = null
 ) {
-    private fun copy(guesses: List<GuessDraw> = this.guesses, danger: List<RectF> = this.danger) = OverlayModel(
+    private fun copy(
+        guesses: List<GuessDraw> = this.guesses, danger: List<RectF> = this.danger, alert: String? = this.alert,
+        alertColor: Int = this.alertColor, brilFrom: RectF? = this.brilFrom, brilTo: RectF? = this.brilTo
+    ) = OverlayModel(
         moves, board, whiteBottom, evalShare, evalText, threatFrom, threatTo, line, title, accuracy,
-        guesses, danger, hanging, plan, alert, alertColor
+        guesses, danger, hanging, plan, alert, alertColor, brilFrom, brilTo
     )
+
+    /** the same picture with the brilliant move the hunter found (the card says so, unless it shows a critical moment) */
+    fun withBrilliant(from: RectF, to: RectF, san: String) =
+        copy(brilFrom = from, brilTo = to, alert = alert ?: "!! brilliant move: $san", alertColor = if (alert != null) alertColor else Label.BRILLIANT.color)
 
     /** the same picture with new guesses (answers filled in) */
     fun withGuesses(gs: List<GuessDraw>) = copy(guesses = gs)
@@ -228,6 +237,7 @@ class BoardOverlay(ctx: Context) : View(ctx) {
             for (r in m.hanging) drawHanging(canvas, r)
             for (s in m.line) drawLineStep(canvas, s)
             for (s in m.plan.reversed()) drawPlanStep(canvas, s)
+            if (m.brilFrom != null && m.brilTo != null) drawBrilliant(canvas, m.brilFrom, m.brilTo)
             if (m.threatFrom != null && m.threatTo != null) drawThreat(canvas, m.threatFrom, m.threatTo)
             // the less likely guesses first, so the most likely one is drawn on top
             for (i in m.guesses.indices.reversed()) drawPrediction(canvas, m.guesses[i], i)
@@ -403,6 +413,30 @@ class BoardOverlay(ctx: Context) : View(ctx) {
             text.textAlign = Paint.Align.CENTER
             text.isFakeBoldText = true
             c.drawText("!", bx, by + r * 0.5f, text)
+            text.isFakeBoldText = false
+        }
+    }
+
+    /** the brilliant move the hunter found: a thick teal arrow, the square lit, and a "!!" badge */
+    private fun drawBrilliant(c: Canvas, from: RectF, to: RectF) {
+        val sq = to.width()
+        val teal = Label.BRILLIANT.color
+        fill.color = Theme.withAlpha(teal, (70 * drawP).toInt())
+        c.drawRoundRect(to, sq * 0.12f, sq * 0.12f, fill)
+        arrow(c, from, to, teal, sq * 0.1f * look.arrowSize, 0.95f, false)
+        val r = sq * 0.17f * drawP
+        if (r > 1f) {
+            val bx = to.right - sq * 0.2f
+            val by = to.top + sq * 0.2f
+            fill.color = Color.argb(160, 0, 0, 0)
+            c.drawCircle(bx, by, r * 1.15f, fill)
+            fill.color = teal
+            c.drawCircle(bx, by, r, fill)
+            text.textSize = r * 1.05f
+            text.textAlign = Paint.Align.CENTER
+            text.isFakeBoldText = true
+            text.color = Color.WHITE
+            c.drawText("!!", bx, by + r * 0.38f, text)
             text.isFakeBoldText = false
         }
     }

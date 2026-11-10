@@ -45,6 +45,7 @@ class ChessService : Service(), SideBarHost, SharedPreferences.OnSharedPreferenc
     private var advisor: Advisor? = null
     private var stockfish: UciEngine? = null
     private var remote: RemoteEngine? = null
+    @Volatile private var illusion: IllusionEngine? = null
     private var worker: Thread? = null
     @Volatile private var running = false
 
@@ -310,11 +311,30 @@ class ChessService : Service(), SideBarHost, SharedPreferences.OnSharedPreferenc
         if (sf.elo != c.elo) sf.configure(c.elo)
         remote?.close()
         remote = if (c.useMaia && c.maiaHost.isNotEmpty()) RemoteEngine(c.maiaHost, c.maiaModel, c.maiaElo, 0, c.maiaTemp) else null
-        engineName = if (remote != null) "maia3 ${c.maiaElo}" + (if (c.maiaHuman > 0) " · human ${c.maiaHuman}%" else "")
+        // illusion (brody's engine) runs on the phone when any of its jobs is on
+        if (c.needIllusion && illusion == null) {
+            illusion = try {
+                IllusionEngine(File(applicationInfo.nativeLibraryDir, "libillusion.so").absolutePath)
+            } catch (e: Exception) {
+                toast("illusion engine missing in this build, using stockfish")
+                null
+            }
+        } else if (!c.needIllusion) {
+            illusion?.close()
+            illusion = null
+        }
+        illusion?.let {
+            it.trapMode = c.illusionTrap
+            it.trapElo = c.maiaElo
+            it.thinkMs = c.thinkMs
+        }
+        val ill = if (c.useIllusion) illusion else null
+        engineName = if (ill != null) "illusion" + (if (c.illusionTrap) " · traps vs ${c.maiaElo}" else "")
+            else if (remote != null) "maia3 ${c.maiaElo}" + (if (c.maiaHuman > 0) " · human ${c.maiaHuman}%" else "")
             else if (c.elo < UciEngine.MAX_ELO) "stockfish ${c.elo}" else "stockfish"
         ready.clear()
         predShownKey = null
-        advisor = Advisor(sf, remote)
+        advisor = Advisor(sf, ill ?: remote)
         tracker?.iAmWhite = c.iAmWhite
         tracker?.autoColor = c.autoColor
         shownFen = null
@@ -669,7 +689,7 @@ class ChessService : Service(), SideBarHost, SharedPreferences.OnSharedPreferenc
             })
             val ms = if (mode == Mode.RETHINK) (c.thinkMs * 2.5f).toInt() else c.thinkMs
             val a = adv.full(fen, c.nMoves, ms, threat = c.showThreat || c.botPlan, maxPower = mode == Mode.SAVE)
-            adv.listerError?.let { toast("maia3 pc not reachable ($it), using stockfish") }
+            adv.listerError?.let { toast(if (c.useIllusion) "illusion: $it, using stockfish" else "maia3 pc not reachable ($it), using stockfish") }
             a
         }
         ready.clear()
@@ -686,7 +706,10 @@ class ChessService : Service(), SideBarHost, SharedPreferences.OnSharedPreferenc
         for (cand in advice.cands) {
             val fr = rect(cand.move.substring(0, 2)) ?: continue
             val to = rect(cand.move.substring(2, 4)) ?: continue
-            moves.add(DrawMove(fr, to, cand.grade, cand.rank, Game.san(fen, cand.move), cand.text, cand.star))
+            // illusion's own pick is tagged: ✦ (its move) or ⚑ (a trap for the opponent's rating)
+            val ill = illusion
+            val tag = if (c.useIllusion && ill != null && early == null && cand.move == ill.lastPick) (if (ill.lastWasTrap) " ⚑" else " ✦") else ""
+            moves.add(DrawMove(fr, to, cand.grade, cand.rank, Game.san(fen, cand.move) + tag, cand.text, cand.star))
         }
         val line = ArrayList<LineStep>()
         if (c.showLine && advice.cands.firstOrNull()?.move == advice.lineFor) {
@@ -739,8 +762,47 @@ class ChessService : Service(), SideBarHost, SharedPreferences.OnSharedPreferenc
         showModel(model)
         myTurnShown = true
         runJudge(g, wb, fen, key, c)
-        if (c.blunderSquares) showDanger(fen, model, g, wb, c)
+        val shownNow = if (c.illusionBrilliant) huntBrilliant(fen, model, advice, g, wb, c) else model
+        if (c.blunderSquares) showDanger(fen, shownNow, g, wb, c)
         return step
+    }
+
+    /**
+     * the brilliant hunter: illusion (and stockfish's best move) are checked for a brilliant move here, a good
+     * sacrifice, judged like the move labels. if one is found it gets a teal "!!" arrow and the card says so.
+     * returns the picture now on the screen
+     */
+    private fun huntBrilliant(fen: String, model: OverlayModel, advice: Advice, g: BoardGeom, wb: Boolean, c: Cfg): OverlayModel {
+        val ill = illusion ?: return model
+        val rv = review ?: return model
+        val picks = LinkedHashSet<String>()
+        try {
+            ill.best(fen, maxOf(400, c.thinkMs))?.let { picks.add(it.move) }
+        } catch (e: Exception) {
+            return model
+        }
+        advice.cands.firstOrNull()?.let { picks.add(it.move) }
+        var found: String? = null
+        for (mv in picks) {
+            if (boardMoved()) return model
+            val lab = try {
+                rv.peek(fen, mv, 250, c.reviewRating)
+            } catch (e: Exception) {
+                null
+            }
+            if (lab == Label.BRILLIANT) {
+                found = mv
+                break
+            }
+        }
+        val mv = found ?: return model
+        val fr = squareRect(g, wb, mv.substring(0, 2)) ?: return model
+        val to = squareRect(g, wb, mv.substring(2, 4)) ?: return model
+        if (lastModel !== model || boardMoved()) return model
+        val next = model.withBrilliant(fr, to, Game.san(fen, mv))
+        shownModel = next
+        showModel(next, restart = false)
+        return next
     }
 
     /**
@@ -872,6 +934,17 @@ class ChessService : Service(), SideBarHost, SharedPreferences.OnSharedPreferenc
         // maia3 on the pc guesses the bot's moves while stockfish scores the position: both at the same time
         val r = if (c.predict) remote else null
         var fromPc: List<Pair<String, Float?>>? = null
+        // without maia3, illusion's move becomes the first guess (it thinks while stockfish does)
+        val ill = if (c.predict && r == null && c.illusionGuess) illusion else null
+        var fromIll: String? = null
+        val illThread = ill?.let { e ->
+            Thread {
+                try {
+                    fromIll = e.best(fen, 300)?.move
+                } catch (x: Exception) {
+                }
+            }.also { it.isDaemon = true; it.start() }
+        }
         val net = r?.let { rr ->
             Thread {
                 try {
@@ -901,7 +974,10 @@ class ChessService : Service(), SideBarHost, SharedPreferences.OnSharedPreferenc
             return
         }
         net?.join(4000)
-        val raw = fromPc?.takeIf { it.isNotEmpty() } ?: lines.map { Pair<String, Float?>(it.move, null) }
+        illThread?.join(2000)
+        val sfGuesses = lines.map { Pair<String, Float?>(it.move, null) }
+        val illFirst = fromIll?.let { listOf(Pair<String, Float?>(it, null)) } ?: emptyList()
+        val raw = fromPc?.takeIf { it.isNotEmpty() } ?: (illFirst + sfGuesses)
 
         val gs = ArrayList<Guess>()
         for ((mv, prob) in raw) {
@@ -1138,6 +1214,7 @@ class ChessService : Service(), SideBarHost, SharedPreferences.OnSharedPreferenc
         if (m.threatFrom != null && m.threatTo != null) pairs.add(Pair(m.threatFrom, m.threatTo))
         for (gs in m.guesses) pairs.add(Pair(gs.from, gs.to))
         for (s in m.plan) pairs.add(Pair(s.from, s.to))
+        if (m.brilFrom != null && m.brilTo != null) pairs.add(Pair(m.brilFrom, m.brilTo))
         for ((a, b) in pairs) {
             ends.add(screenIndexOf(a.centerX(), a.centerY(), g))
             ends.add(screenIndexOf(b.centerX(), b.centerY(), g))
@@ -1267,6 +1344,7 @@ class ChessService : Service(), SideBarHost, SharedPreferences.OnSharedPreferenc
         try { reader?.close() } catch (_: Exception) {}
         stockfish?.close()
         remote?.close()
+        illusion?.close()
         super.onDestroy()
     }
 }

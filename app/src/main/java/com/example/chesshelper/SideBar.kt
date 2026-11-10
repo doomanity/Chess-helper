@@ -440,7 +440,8 @@ class SideBar(private val ctx: Context, private val wm: WindowManager, private v
         g.add(ui.segRow("i play", listOf("auto" to "auto", "white" to "white", "black" to "black"), cfg.colorMode) { v ->
             save { it.putString("color", v) }
         })
-        g.add(ui.segRow("engine", listOf("stockfish" to "stockfish", "maia3" to "maia3 (pc)"), if (cfg.useMaia) "maia3" else "stockfish") { v ->
+        val engineNow = if (cfg.useMaia) "maia3" else if (cfg.useIllusion) "illusion" else "stockfish"
+        g.add(ui.segRow("engine", listOf("stockfish" to "stockfish", "maia3" to "maia3", "illusion" to "illusion"), engineNow) { v ->
             save { it.putString("engine", v) }
             box.post { rebuild() }
         })
@@ -448,6 +449,9 @@ class SideBar(private val ctx: Context, private val wm: WindowManager, private v
             g.add(ui.sliderRow("plays like", 600, 2600, 100, cfg.maiaElo, { "$it" }) { v -> save { it.putInt("maia_elo", v) } })
             g.add(ui.sliderRow("human-ness", 0, 100, 5, cfg.maiaHuman, { if (it == 0) "top pick" else "$it%" }) { v -> save { it.putInt("maia_human", v) } })
             if (cfg.maiaHost.isEmpty()) g.add(ui.noteRow("set the pc address in the app first", ui.orange, 13f))
+        } else if (cfg.useIllusion) {
+            g.add(ui.toggleRow("trap mode", cfg.illusionTrap) { on -> save { it.putBoolean("illusion_trap", on) } })
+            g.add(ui.sliderRow("opponent rating", 600, 2600, 100, cfg.maiaElo, { "$it" }) { v -> save { it.putInt("maia_elo", v) } })
         } else {
             g.add(ui.sliderRow("strength", UciEngine.MIN_ELO, UciEngine.MAX_ELO, 10, cfg.elo,
                 { if (it >= UciEngine.MAX_ELO) "full power" else "elo $it" }) { v -> save { it.putInt("elo2", v) } })
@@ -455,6 +459,10 @@ class SideBar(private val ctx: Context, private val wm: WindowManager, private v
         g.add(ui.segRow("moves shown", (1..4).map { it.toString() to it.toString() }, cfg.nMoves.toString()) { v ->
             save { it.putInt("n_moves", v.toInt()) }
         })
+
+        g = ui.group(box, "illusion")
+        g.add(ui.toggleRow("brilliant hunter", cfg.illusionBrilliant) { on -> save { it.putBoolean("illusion_brilliant", on) } })
+        g.add(ui.toggleRow("guess the bot", cfg.illusionGuess) { on -> save { it.putBoolean("illusion_guess", on) } })
 
         g = ui.group(box, "show")
         g.add(ui.toggleRow("eval bar", cfg.showEval) { on -> save { it.putBoolean("show_eval", on) } })

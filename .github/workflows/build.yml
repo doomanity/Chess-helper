@@ -30,6 +30,19 @@ jobs:
           cp stockfish "$GITHUB_WORKSPACE/app/src/main/jniLibs/arm64-v8a/libstockfish.so"
           file stockfish || true
 
+      - name: build illusion for android (arm64)
+        run: |
+          # brody's own engine (github.com/doomanity/Illusion), pure rust: one cross compile with the ndk's linker
+          NDK="${ANDROID_NDK_LATEST_HOME:-$ANDROID_NDK_HOME}"
+          export CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER="$NDK/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android30-clang"
+          rustup target add aarch64-linux-android
+          git clone --depth 1 https://github.com/doomanity/Illusion.git
+          cd Illusion/engine
+          cargo build --release --target aarch64-linux-android --bin illusion
+          mkdir -p "$GITHUB_WORKSPACE/app/src/main/jniLibs/arm64-v8a"
+          cp target/aarch64-linux-android/release/illusion "$GITHUB_WORKSPACE/app/src/main/jniLibs/arm64-v8a/libillusion.so"
+          file target/aarch64-linux-android/release/illusion || true
+
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: "8.7"

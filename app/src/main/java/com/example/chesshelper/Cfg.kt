@@ -13,6 +13,11 @@ class Cfg(p: SharedPreferences) {
     val myTurnAtStart = p.getBoolean("my_turn", true)
     val elo = p.getInt("elo2", UciEngine.MAX_ELO)
     val useMaia = p.getString("engine", "stockfish") == "maia3"
+    val useIllusion = p.getString("engine", "stockfish") == "illusion" // brody's own engine, on the phone
+    val illusionTrap = p.getBoolean("illusion_trap", true)        // illusion picks traps for a player of the opponent's rating
+    val illusionBrilliant = p.getBoolean("illusion_brilliant", true) // illusion hunts brilliant moves on your turn
+    val illusionGuess = p.getBoolean("illusion_guess", true)      // illusion guesses the bot's move when maia3 is off
+    val needIllusion: Boolean get() = useIllusion || illusionBrilliant || (illusionGuess && !useMaia)
     val maiaHost = (p.getString("maia_host", "") ?: "").trim()
     val maiaModel = (p.getString("maia_model", "23m") ?: "23m").trim().ifEmpty { "23m" }
     val maiaElo = p.getInt("maia_elo", 1500)
