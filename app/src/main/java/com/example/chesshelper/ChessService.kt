@@ -46,6 +46,7 @@ class ChessService : Service(), SideBarHost, SharedPreferences.OnSharedPreferenc
     private var stockfish: UciEngine? = null
     private var remote: RemoteEngine? = null
     @Volatile private var illusion: IllusionEngine? = null
+    private var restarts = 0
 
     // engine control: the engine plays your moves by tapping the board (against computer bots)
     @Volatile private var autoPlay = false
@@ -498,6 +499,40 @@ class ChessService : Service(), SideBarHost, SharedPreferences.OnSharedPreferenc
 
     private fun thumbOf(f: Frame) = BoardVision.thumb(f.px, f.w, f.h, f.local)
 
+    /**
+     * starts an engine again if its program died (android may kill a busy background program, especially with two
+     * engines running, or it crashed). the board reading goes on, and the next move uses the new engine
+     */
+    private fun reviveEngines() {
+        val c = cfg ?: Cfg.load(this)
+        val sf = stockfish
+        if (sf != null && !sf.alive) {
+            try { sf.close() } catch (_: Exception) {}
+            try {
+                val n = UciEngine(File(applicationInfo.nativeLibraryDir, "libstockfish.so").absolutePath)
+                n.configure(c.elo)
+                stockfish = n
+                review = LiveReview(n, book)
+                restarts++
+                toast("stockfish stopped, restarted it ($restarts)")
+            } catch (e: Exception) {
+                say("stockfish won't start again: ${e.message}")
+                return
+            }
+            illusion?.let { if (!it.alive) { try { it.close() } catch (_: Exception) {}; illusion = null } }
+            applyEngineSettings() // the advisor and illusion get the new stockfish
+            return
+        }
+        val ill = illusion
+        if (ill != null && !ill.alive) {
+            try { ill.close() } catch (_: Exception) {}
+            illusion = null
+            restarts++
+            toast("illusion stopped, restarted it ($restarts)")
+            applyEngineSettings() // starts illusion again
+        }
+    }
+
     // ---------------------------------------------------------------- main loop
 
     private fun loop() {
@@ -536,6 +571,7 @@ class ChessService : Service(), SideBarHost, SharedPreferences.OnSharedPreferenc
                         engineDirty = false
                         applyEngineSettings()
                     }
+                    reviveEngines()
                     if (panelOpen) {
                         // the menu covers the screen: don't read it, just wait
                         Thread.sleep(200)
@@ -641,9 +677,17 @@ class ChessService : Service(), SideBarHost, SharedPreferences.OnSharedPreferenc
                 } catch (e: InterruptedException) {
                     throw e
                 } catch (e: Exception) {
-                    say("error: ${e.message}")
-                    toast("error: ${e.message}")
-                    Thread.sleep(1500)
+                    if (stockfish?.alive == false || illusion?.alive == false) {
+                        // an engine died in the middle of a move: start it again and read the board again
+                        say("an engine stopped, restarting it...")
+                        reviveEngines()
+                        prevThumb = null
+                        wantRead = true
+                    } else {
+                        say("error: ${e.message}")
+                        toast("error: ${e.message}")
+                    }
+                    Thread.sleep(800)
                 }
             }
         } catch (e: InterruptedException) {

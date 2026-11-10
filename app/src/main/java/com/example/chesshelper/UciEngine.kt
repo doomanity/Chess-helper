@@ -147,6 +147,9 @@ class UciEngine(path: String) : MoveEngine {
         proc.destroy()
     }
 
+    /** false once the engine program has died (android can kill it in the background, or it crashed) */
+    val alive: Boolean get() = proc.isAlive
+
     companion object {
         const val MIN_ELO = 1320
         const val MAX_ELO = 3190

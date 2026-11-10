@@ -120,6 +120,9 @@ class IllusionEngine(path: String) : MoveLister {
         return listOfNotNull(l?.move)
     }
 
+    /** false once the program has died */
+    val alive: Boolean get() = proc.isAlive
+
     fun close() {
         try {
             send("quit")
