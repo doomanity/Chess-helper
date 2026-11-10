@@ -78,6 +78,9 @@ use it against computer bots only: chess.com and lichess ban accounts that let a
 - a new game is seen by itself as soon as the start position shows up, either way up. the way the board faces tells your side, so a game as black right after a game as white needs nothing (with "i play: auto")
 - started in the middle of a game, your side is worked out from several clues: where the pawns stand (they only move forward), where the kings are, the board's coordinates, and which half has more white pieces
 - pause clears the board, and nothing from before the pause comes back after resume
+- premoves: when you premove during the bot's turn, the chess app already draws your move. the helper waits for the bot instead of believing it, then reads the bot's move and your premove together. a piece you are holding (lifted off its square) doesn't count as a move either
+- a board check every few seconds compares the squares themselves with the last read, so a change too small to notice still gets read
+- the bot's guesses show up faster (a shorter first search, and less waiting for the pc or illusion)
 - if you (or the bot) move while the helper is still drawing, it notices and reads the board again right away, so the suggestions don't get stuck on the bot's turn
 - a promoted piece is looked at a few more times after the promotion (the first look can catch the piece picker or the animation). if it was misread, it is fixed by itself, also when the piece already moved
 

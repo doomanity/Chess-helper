@@ -407,6 +407,46 @@ fun sideSwitch() {
     println("  knights back home: still the same game ok")
 }
 
+/**
+ * a premove: during the bot's turn the chess app already draws your next move. the tracker must wait (HOLD), not
+ * believe it, then read the bot's move and your premove together when the bot plays. also a piece you hold
+ * (lifted off its square) must not count as a change
+ */
+fun premoveHold() {
+    println("== premove and a lifted piece")
+    for (white in listOf(true, false)) {
+        val sc = Scene(looks[0], 1189, 2576, 78, 918, 1032, white, Random(41))
+        val truth = Board(); val tr = Tracker(white, true); tr.autoColor = true; val ph = Phone(tr, sc)
+        ph.look(render(sc, truth, null, null))
+        // white plays e4, black e5, white Nf3: then it is the bot's turn when you are white, yours when black
+        val opening = if (white) "e2e4 e7e5 g1f3" else "e2e4 e7e5 g1f3 b8c6"
+        for (u in opening.split(" ")) { val mv = playMove(truth, u); ph.look(render(sc, truth, mv.from.ordinal, mv.to.ordinal)) }
+        val before = tr.board?.fen
+        // it is the bot's turn. you premove: the app draws your move already
+        val myPre = if (white) "f1c4" else "g8f6"
+        // draw the premove: put the side to move as you, play your move on a copy
+        val asMe = boardOf(truth.fen.replace(if (white) " b " else " w ", if (white) " w " else " b "))
+        playMove(asMe, myPre)
+        val st = ph.look(render(sc, asMe, null, null))
+        check(st == Tracker.Step.HOLD, "premove picture should be held (white=$white), was $st")
+        check(tr.board?.fen == before, "premove must not change the board (white=$white)")
+        // the bot plays, then the premove goes through at once
+        val botMv = if (white) "b8c6" else "f1c4"
+        playMove(truth, botMv); playMove(truth, myPre)
+        val st2 = ph.look(render(sc, truth, null, null))
+        check(samePosition(tr, truth), "after the bot's move and the premove (white=$white), step $st2\n    truth   ${truth.fen}\n    tracker ${tr.board?.fen}")
+        // a lifted piece: one of your pieces missing from its square
+        val lifted = boardOf(truth.fen)
+        val mySq = if (white) "D1" else "D8"
+        lifted.unsetPiece(lifted.getPiece(com.github.bhlangonijr.chesslib.Square.valueOf(mySq)), com.github.bhlangonijr.chesslib.Square.valueOf(mySq))
+        val st3 = ph.look(render(sc, lifted, null, null))
+        check((st3 == Tracker.Step.HOLD || st3 == Tracker.Step.NO_CHANGE) && samePosition(tr, truth), "a lifted piece changes nothing (white=$white), was $st3")
+        ph.look(render(sc, truth, null, null))
+        check(samePosition(tr, truth), "piece put back (white=$white)")
+        println("  ${if (white) "white" else "black"}: premove held, then read with the bot's move; lifted piece ignored ok")
+    }
+}
+
 /** the lost-track case: the misread queen moves like a knight before we had a second look */
 fun promoLost() {
     println("== misread promotion, then the piece moves")
@@ -580,6 +620,7 @@ fun main(args: Array<String>) {
     promoRecheck()
     promoLost()
     sideSwitch()
+    premoveHold()
     midGame()
     println("== simulated games")
     var seed = 100L

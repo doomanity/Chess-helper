@@ -525,6 +525,7 @@ class ChessService : Service(), SideBarHost, SharedPreferences.OnSharedPreferenc
         var moving = false
         var lastRead = 0L
         var lastStep = Tracker.Step.UNREADABLE
+        var lastCheck = 0L
         var lostBoardSince = 0L
         say("open your chess app")
         try {
@@ -619,8 +620,15 @@ class ChessService : Service(), SideBarHost, SharedPreferences.OnSharedPreferenc
                     }
 
                     // the picture is calm. read it when something moved, or again while we can't make sense of it
-                    val due = moving || prev == null || wantRead ||
-                        (lastStep == Tracker.Step.UNREADABLE && now - lastRead >= 700)
+                    var due = moving || prev == null || wantRead ||
+                        (lastStep == Tracker.Step.UNREADABLE && now - lastRead >= 700) ||
+                        (lastStep == Tracker.Step.HOLD && now - lastRead >= 3000)
+                    // the board check: every few seconds compare the squares themselves with the last read (not just
+                    // the small picture), so a change too small to notice still gets read
+                    if (!due && now - lastCheck >= CHECK_MS && lastCls != null) {
+                        lastCheck = now
+                        if (!justCosmetic(f)) due = true
+                    }
                     if (!due) {
                         Thread.sleep(POLL)
                         continue
@@ -721,6 +729,12 @@ class ChessService : Service(), SideBarHost, SharedPreferences.OnSharedPreferenc
         } else if (step == Tracker.Step.UNREADABLE) {
             say("can't follow what's on the board, looking again...")
             debugLine(tracker, step)
+            return step
+        } else if (step == Tracker.Step.HOLD) {
+            // your premove drawn early, or a piece in your hand: the position didn't change, put the picture back
+            say("waiting for the bot (premove) or your move...")
+            debugLine(tracker, step)
+            lastModel?.let { showModel(it, restart = false) }
             return step
         }
 
@@ -1094,7 +1108,7 @@ class ChessService : Service(), SideBarHost, SharedPreferences.OnSharedPreferenc
         val illThread = ill?.let { e ->
             Thread {
                 try {
-                    fromIll = e.best(fen, 300)?.move
+                    fromIll = e.best(fen, 200)?.move
                 } catch (x: Exception) {
                 }
             }.also { it.isDaemon = true; it.start() }
@@ -1110,7 +1124,7 @@ class ChessService : Service(), SideBarHost, SharedPreferences.OnSharedPreferenc
         }
         // one search gives the score (eval bar, accuracy) and, without maia3, the guesses
         val lines = try {
-            sf.analyse(fen, 300, if (c.predict) GUESSES else 1)
+            sf.analyse(fen, GUESS_MS, if (c.predict) GUESSES else 1)
         } catch (e: IllegalStateException) {
             emptyList()
         }
@@ -1127,8 +1141,8 @@ class ChessService : Service(), SideBarHost, SharedPreferences.OnSharedPreferenc
             runJudge(g, wb, fen, key, c)
             return
         }
-        net?.join(4000)
-        illThread?.join(2000)
+        net?.join(1500)
+        illThread?.join(800)
         val sfGuesses = lines.map { Pair<String, Float?>(it.move, null) }
         val illFirst = fromIll?.let { listOf(Pair<String, Float?>(it, null)) } ?: emptyList()
         val raw = fromPc?.takeIf { it.isNotEmpty() } ?: (illFirst + sfGuesses)
@@ -1494,6 +1508,8 @@ class ChessService : Service(), SideBarHost, SharedPreferences.OnSharedPreferenc
     companion object {
         const val GUESSES = 3 // how many of the bot's likely moves to show while it thinks
         const val PREMOVE_ILLUSION_MS = 250 // illusion's think for one premove
+        const val CHECK_MS = 2500L          // how often the board check compares the squares with the last read
+        const val GUESS_MS = 180            // stockfish's search for the score and the bot's likely moves
         private const val POLL = 120L // ms between looks at the screen
     }
 

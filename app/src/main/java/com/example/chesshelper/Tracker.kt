@@ -10,7 +10,29 @@ import com.github.bhlangonijr.chesslib.Side
  * and can't recognize the pieces ourselves.
  */
 class Tracker(var iAmWhite: Boolean, private val myTurnAtStart: Boolean) {
-    enum class Step { NEED_AI, STARTED, NO_CHANGE, MOVED, UNREADABLE, RESYNC, RESET }
+    enum class Step { NEED_AI, STARTED, NO_CHANGE, MOVED, UNREADABLE, RESYNC, RESET, HOLD }
+
+    // a picture that only lasts a moment: your premove drawn by the chess app before the bot moved, or a piece you
+    // are holding (lifted off its square). we wait it out instead of believing it
+    private var holdScreen: IntArray? = null
+    // we know for sure whose turn it is: a normal game start, or we have seen a move since. only then can a move of
+    // yours on the bot's turn be a premove (right after a guessed start it means our guess was wrong)
+    private var turnSure = false
+    private var holdSince = 0L
+    private var holdCount = 0
+
+    /** true if this screen is the same moment we are already waiting out, for long enough to stop waiting */
+    private fun heldTooLong(screen: IntArray, nowMs: Long): Boolean {
+        val hs = holdScreen
+        if (hs == null || Game.mismatch(hs, screen) > 0) {
+            holdScreen = screen.copyOf()
+            holdSince = nowMs
+            holdCount = 1
+            return false
+        }
+        holdCount++
+        return if (nowMs == 0L) holdCount > 3 else nowMs - holdSince > HOLD_MS
+    }
 
     /** auto color: your side is the one at the bottom of the screen (every chess app shows your pieces there) */
     var autoColor = false
@@ -53,6 +75,7 @@ class Tracker(var iAmWhite: Boolean, private val myTurnAtStart: Boolean) {
         private set
 
     private fun restartLog(b: Board) {
+        turnSure = false
         startFen = b.fen
         playedMoves.clear()
         logVersion++
@@ -80,6 +103,7 @@ class Tracker(var iAmWhite: Boolean, private val myTurnAtStart: Boolean) {
     companion object {
         const val START_PLACEMENT = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR"
         const val MAX_PLY = 3
+        const val HOLD_MS = 9000L   // the longest we wait out a premove picture or a lifted piece
         const val LOST_MS = 2500L   // how long a position we can't explain has to stay on screen before we start over
         const val SUSPECT = 3       // this many piece types that look wrong means our board is probably wrong
     }
@@ -171,6 +195,7 @@ class Tracker(var iAmWhite: Boolean, private val myTurnAtStart: Boolean) {
             board = b
             whiteBottom = startWb
             restartLog(b)
+            turnSure = true
             needsVerify = false
             suspicious = 0
             clearMisses()
@@ -188,6 +213,7 @@ class Tracker(var iAmWhite: Boolean, private val myTurnAtStart: Boolean) {
                 val b = Board() // standard starting position, white to move
                 board = b
                 restartLog(b)
+                turnSure = true
                 needsVerify = false
                 suspicious = 0
                 clearMisses()
@@ -230,7 +256,26 @@ class Tracker(var iAmWhite: Boolean, private val myTurnAtStart: Boolean) {
                 }
             }
         }
-        val hit = bestHit
+        val hit0 = bestHit
+        // your premove: it is the bot's turn and the screen shows one move of yours. the chess app draws a premove
+        // before the bot has moved, so wait for the bot (then both moves show and are read normally). if it stays
+        // like that for long, we really had the wrong side to move after all
+        val botsTurn = (known.sideToMove == Side.WHITE) != meWhite()
+        if (hit0 != null && bestOther && bestD == 1 && botsTurn && turnSure && whiteBottom != null && !heldTooLong(screen, nowMs)) {
+            return Step.HOLD
+        }
+        // a piece you are holding: one of your squares is empty and nothing else changed
+        if (hit0 == null) {
+            val knownOcc = Game.occOf(known)
+            val diff = (0 until 64).filter { knownOcc[it] != occ[it] }
+            if (diff.size == 1 && occ[diff[0]] == 0) {
+                val p = known.getPiece(com.github.bhlangonijr.chesslib.Square.squareAt(diff[0]))
+                val mine = p != com.github.bhlangonijr.chesslib.Piece.NONE && (p.pieceSide == Side.WHITE) == meWhite()
+                if (mine && !heldTooLong(screen, nowMs)) return Step.HOLD
+            }
+        }
+        if (hit0 != null) holdScreen = null
+        val hit = hit0
         if (System.getProperty("tdebug") != null) println("        [trk] known=${known.fen} mis0=${Game.mismatch(Game.occOf(known), occ)} -> other=$bestOther d=$bestD cost=$bestCost mis=${hit?.mis} path=${hit?.path}")
         if (hit != null) {
             val target = if (bestOther) other else known
@@ -247,6 +292,7 @@ class Tracker(var iAmWhite: Boolean, private val myTurnAtStart: Boolean) {
             board = target
             clearMisses()
             lastPlies = bestD
+            if (bestD > 0 && !bestOther) turnSure = true
             if (Game.hasPromotion(hit)) {
                 // with the piece shapes known we already picked the piece that fits what we see
                 needsVerify = !templates.complete
