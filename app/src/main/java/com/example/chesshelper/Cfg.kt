@@ -14,7 +14,10 @@ class Cfg(p: SharedPreferences) {
     val elo = p.getInt("elo2", UciEngine.MAX_ELO)
     val useMaia = p.getString("engine", "stockfish") == "maia3"
     val useIllusion = p.getString("engine", "stockfish") == "illusion" // brody's own engine, on the phone
-    val illusionTrap = p.getBoolean("illusion_trap", true)        // illusion picks traps for a player of the opponent's rating
+    val illusionHuman = p.getBoolean("illusion_human", true)      // illusion's human mode: attacks, trades, anti-draw, sacrifices, traps
+    val illusionAggression = p.getInt("illusion_aggression", 50)  // 0..100: how much it attacks the king
+    val illusionContempt = p.getInt("illusion_contempt", 25)      // 0..200: how much it avoids draws (centipawns)
+    val illusionTolerance = p.getInt("illusion_tolerance", 60)    // 0..300: the most a trap may cost vs the best move
     val illusionBrilliant = p.getBoolean("illusion_brilliant", true) // illusion hunts brilliant moves on your turn
     val illusionGuess = p.getBoolean("illusion_guess", true)      // illusion guesses the bot's move when maia3 is off
     val controlButton = p.getBoolean("control_button", true)      // the floating play / stop button for engine control

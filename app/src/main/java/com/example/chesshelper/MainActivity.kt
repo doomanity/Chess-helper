@@ -87,8 +87,16 @@ class MainActivity : Activity() {
         } else if (c.useIllusion) {
             maiaHostBox = EditText(this).apply { setText(c.maiaHost) }
             maiaModelBox = EditText(this).apply { setText(c.maiaModel) }
-            g.add(ui.toggleRow("trap mode", c.illusionTrap, "picks moves that fool a player of the opponent's rating") { on -> save { it.putBoolean("illusion_trap", on) } })
+            g.add(ui.toggleRow("human mode", c.illusionHuman, "attacks, smart trades, anti-draw, sacrifices and traps. off = pure engine") { on ->
+                save { it.putBoolean("illusion_human", on) }
+                storeText(); root.post { rebuild() }
+            })
             g.add(ui.sliderRow("opponent rating", 600, 2600, 100, c.maiaElo, { "$it" }) { v -> save { it.putInt("maia_elo", v) } })
+            if (c.illusionHuman) {
+                g.add(ui.sliderRow("aggression", 0, 100, 5, c.illusionAggression, { "$it" }) { v -> save { it.putInt("illusion_aggression", v) } })
+                g.add(ui.sliderRow("contempt", 0, 200, 5, c.illusionContempt, { if (it == 0) "takes draws" else "$it" }) { v -> save { it.putInt("illusion_contempt", v) } })
+                g.add(ui.sliderRow("swindle tolerance", 0, 300, 10, c.illusionTolerance, { if (it == 0) "no traps" else "$it" }) { v -> save { it.putInt("illusion_tolerance", v) } })
+            }
         } else {
             maiaHostBox = EditText(this).apply { setText(c.maiaHost) }
             maiaModelBox = EditText(this).apply { setText(c.maiaModel) }

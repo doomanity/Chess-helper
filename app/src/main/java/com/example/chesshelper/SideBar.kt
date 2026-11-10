@@ -450,8 +450,16 @@ class SideBar(private val ctx: Context, private val wm: WindowManager, private v
             g.add(ui.sliderRow("human-ness", 0, 100, 5, cfg.maiaHuman, { if (it == 0) "top pick" else "$it%" }) { v -> save { it.putInt("maia_human", v) } })
             if (cfg.maiaHost.isEmpty()) g.add(ui.noteRow("set the pc address in the app first", ui.orange, 13f))
         } else if (cfg.useIllusion) {
-            g.add(ui.toggleRow("trap mode", cfg.illusionTrap) { on -> save { it.putBoolean("illusion_trap", on) } })
+            g.add(ui.toggleRow("human mode", cfg.illusionHuman) { on ->
+                save { it.putBoolean("illusion_human", on) }
+                box.post { rebuild() }
+            })
             g.add(ui.sliderRow("opponent rating", 600, 2600, 100, cfg.maiaElo, { "$it" }) { v -> save { it.putInt("maia_elo", v) } })
+            if (cfg.illusionHuman) {
+                g.add(ui.sliderRow("aggression", 0, 100, 5, cfg.illusionAggression, { "$it" }) { v -> save { it.putInt("illusion_aggression", v) } })
+                g.add(ui.sliderRow("contempt", 0, 200, 5, cfg.illusionContempt, { if (it == 0) "takes draws" else "$it" }) { v -> save { it.putInt("illusion_contempt", v) } })
+                g.add(ui.sliderRow("swindle tolerance", 0, 300, 10, cfg.illusionTolerance, { if (it == 0) "no traps" else "$it" }) { v -> save { it.putInt("illusion_tolerance", v) } })
+            }
         } else {
             g.add(ui.sliderRow("strength", UciEngine.MIN_ELO, UciEngine.MAX_ELO, 10, cfg.elo,
                 { if (it >= UciEngine.MAX_ELO) "full power" else "elo $it" }) { v -> save { it.putInt("elo2", v) } })

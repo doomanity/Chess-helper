@@ -9,8 +9,8 @@ three engines: stockfish (on the phone, adjustable difficulty), maia3 (plays lik
 ## illusion
 
 - **as your engine**: pick "illusion" in the engine picker. its pick is first on the card, tagged ✦ (or ⚑ when it is a trap), and stockfish fills the other moves. stockfish still grades every move, so the numbers always mean the same thing
-- **trap mode**: illusion's swindle mode, set to the opponent's rating: it picks moves that are good and likely to fool a player of that level
-- **brilliant hunter**: on your turn illusion (and stockfish's best move) are checked for a brilliant move, judged like the move labels. if there is one, a thick teal arrow with "!!" shows it and the card says "!! brilliant move: ..."
+- **human mode**: illusion's personality, one switch: it attacks the king, trades when ahead and keeps pieces when behind, avoids draws, hunts sound sacrifices and sets traps for a player of the "opponent rating". off = pure engine. sliders: aggression (0-100), contempt (0-200, how much it hates draws), swindle tolerance (0-300, the most a trap may cost vs the best move, 0 = no traps). on the card its pick is tagged ✦, ⚑ when it is a trap, !! when it is a real sacrifice
+- **brilliant hunter**: on your turn illusion looks for a brilliant move (in human mode it flags real sacrifices itself, and that flag is trusted), with the move labels' brilliant rule as a backup on stockfish's best move. if there is one, a thick teal arrow with "!!" shows it and the card says "!! brilliant move: ..."
 - **guess the bot**: with maia3 off, illusion's move is the first of the 3 guesses
 - premoves are worked out quickly (illusion thinks 250 ms per premove, no threat search), and the threat and plan are added right after your move shows
 - it uses its hand made evaluation for now (no trained net loaded yet)

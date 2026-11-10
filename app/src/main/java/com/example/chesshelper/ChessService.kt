@@ -421,12 +421,15 @@ class ChessService : Service(), SideBarHost, SharedPreferences.OnSharedPreferenc
             illusion = null
         }
         illusion?.let {
-            it.trapMode = c.illusionTrap
+            it.humanMode = c.illusionHuman
             it.trapElo = c.maiaElo
+            it.aggression = c.illusionAggression
+            it.contempt = c.illusionContempt
+            it.tolerance = c.illusionTolerance
             it.thinkMs = c.thinkMs
         }
         val ill = if (c.useIllusion) illusion else null
-        engineName = if (ill != null) "illusion" + (if (c.illusionTrap) " · traps vs ${c.maiaElo}" else "")
+        engineName = if (ill != null) "illusion" + (if (c.illusionHuman) " · human vs ${c.maiaElo}" else "")
             else if (remote != null) "maia3 ${c.maiaElo}" + (if (c.maiaHuman > 0) " · human ${c.maiaHuman}%" else "")
             else if (c.elo < UciEngine.MAX_ELO) "stockfish ${c.elo}" else "stockfish"
         ready.clear()
@@ -819,7 +822,9 @@ class ChessService : Service(), SideBarHost, SharedPreferences.OnSharedPreferenc
             val to = rect(cand.move.substring(2, 4)) ?: continue
             // illusion's own pick is tagged: ✦ (its move) or ⚑ (a trap for the opponent's rating)
             val ill = illusion
-            val tag = if (c.useIllusion && ill != null && early == null && cand.move == ill.lastPick) (if (ill.lastWasTrap) " ⚑" else " ✦") else ""
+            val tag = if (c.useIllusion && ill != null && early == null && cand.move == ill.lastPick) {
+                if (ill.lastWasBrilliant) " !!" else if (ill.lastWasTrap) " ⚑" else " ✦"
+            } else ""
             moves.add(DrawMove(fr, to, cand.grade, cand.rank, Game.san(fen, cand.move) + tag, cand.text, cand.star))
         }
         val line = ArrayList<LineStep>()
@@ -920,14 +925,19 @@ class ChessService : Service(), SideBarHost, SharedPreferences.OnSharedPreferenc
         val ill = illusion ?: return model
         val rv = review ?: return model
         val picks = LinkedHashSet<String>()
+        var found: String? = null
         try {
-            ill.best(fen, maxOf(400, c.thinkMs))?.let { picks.add(it.move) }
+            // in human mode illusion hunts sound sacrifices itself and says "brilliant move !!": trust that flag
+            val l = ill.best(fen, maxOf(400, c.thinkMs), c.illusionHuman, c.maiaElo)
+            if (l != null) {
+                if (ill.lastFlaggedBrilliant) found = l.move else picks.add(l.move)
+            }
         } catch (e: Exception) {
             return model
         }
-        advice.cands.firstOrNull()?.let { picks.add(it.move) }
-        var found: String? = null
-        for (mv in picks) {
+        // our own check (the move labels' brilliant rule) as the backup
+        if (found == null) advice.cands.firstOrNull()?.let { picks.add(it.move) }
+        if (found == null) for (mv in picks) {
             if (boardMoved()) return model
             val lab = try {
                 rv.peek(fen, mv, 250, c.reviewRating)
