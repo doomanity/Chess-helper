@@ -1162,9 +1162,9 @@ class ChessService : Service(), SideBarHost, SharedPreferences.OnSharedPreferenc
         var shown: OverlayModel = model
         // premoves have to be quick: no threat / plan search here (that comes right after your move shows), and
         // illusion gets a short think. a failed illusion pick just falls back to stockfish's moves
-        val ill = illusion
-        val illMs = ill?.thinkMs
-        ill?.thinkMs = PREMOVE_ILLUSION_MS
+        val preIll = illusion
+        val illMs = preIll?.thinkMs
+        preIll?.thinkMs = PREMOVE_ILLUSION_MS
         try {
         if (adv != null) for ((i, x) in gs.withIndex()) {
             if (boardMoved()) return
@@ -1185,7 +1185,7 @@ class ChessService : Service(), SideBarHost, SharedPreferences.OnSharedPreferenc
             showModel(next, restart = false, wait = false)
         }
         } finally {
-            if (ill != null && illMs != null) ill.thinkMs = illMs
+            if (preIll != null && illMs != null) preIll.thinkMs = illMs
         }
         settleLater()
         say("your answers are ready: " + gs.joinToString("  ") { it.san })
