@@ -73,6 +73,8 @@ a small round floating button: green play = you play, tap it and it turns red, n
 
 android only lets an accessibility service tap the screen, so allow it once: main screen > "allow engine control" > chess helper engine control > on. if the switch is greyed out (android does that for apps installed from a browser), open the app's info page > ⋮ (top right) > allow restricted settings, then try again. it only taps, it reads nothing from other apps.
 
+speed: engine control has its own think time (default 250 ms) and a "wait before tapping" slider (default none). it taps first and draws after, and leaves out the threat and plan extras, so a move goes out in well under a second (at once when the bot plays a move it guessed).
+
 use it against computer bots only: chess.com and lichess ban accounts that let an engine play against people. to let illusion play people online the allowed way, use a lichess bot account.
 
 ## reading the board

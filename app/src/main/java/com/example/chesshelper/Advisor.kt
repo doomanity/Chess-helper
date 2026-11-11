@@ -21,7 +21,23 @@ class Advisor(private val sf: UciEngine, private val lister: MoveLister?) {
      */
     fun full(fen: String, n: Int, ms: Int = 700, threat: Boolean = true, maxPower: Boolean = false): Advice {
         listerError = null
-        val lines = sf.analyse(fen, if (maxPower) maxOf(ms, 2500) else ms, if (maxPower) 1 else maxOf(8, n))
+        // the other engine (illusion, maia3) thinks at the same time as stockfish, not after it
+        val picked = ArrayList<String>()
+        var pickErr: String? = null
+        val pickThread = if (lister != null && !maxPower) Thread {
+            try {
+                picked.addAll(lister.topMoves(fen, n))
+            } catch (e: IOException) {
+                pickErr = e.message ?: "not reachable"
+            } catch (e: Exception) {
+                pickErr = e.message ?: "failed"
+            }
+        }.also { it.start() } else null
+        val lines = try {
+            sf.analyse(fen, if (maxPower) maxOf(ms, 2500) else ms, if (maxPower) 1 else maxOf(8, n))
+        } finally {
+            pickThread?.join()
+        }
         if (lines.isEmpty()) return Advice(emptyList(), 0, null, null, emptyList())
         val top = lines[0]
         val whiteToMove = fen.split(" ").getOrNull(1) != "b"
@@ -37,13 +53,8 @@ class Advisor(private val sf: UciEngine, private val lister: MoveLister?) {
         }
 
         val picks = ArrayList<String>()
-        if (lister != null) {
-            try {
-                picks.addAll(lister.topMoves(fen, n))
-            } catch (e: IOException) {
-                listerError = e.message ?: "not reachable"
-            }
-        }
+        picks.addAll(picked)
+        listerError = pickErr
         if (picks.isEmpty() && sf.isLimited) {
             // the difficulty setting makes stockfish play worse on purpose: its own pick goes first
             sf.playedMove(fen, ms)?.let { picks.add(it) }

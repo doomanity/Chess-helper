@@ -127,6 +127,8 @@ class MainActivity : Activity() {
             } catch (_: Exception) {}
         })
         g.add(ui.toggleRow("show the play button", c.controlButton) { on -> save { it.putBoolean("control_button", on) } })
+        g.add(ui.sliderRow("think time", 100, 1000, 50, c.autoThinkMs, { "$it ms" }) { v -> save { it.putInt("auto_think_ms", v) } })
+        g.add(ui.sliderRow("wait before tapping", 0, 600, 25, c.autoPauseMs, { if (it == 0) "none" else "$it ms" }) { v -> save { it.putInt("auto_pause_ms", v) } })
 
         // ---- illusion's extra jobs (they work with any engine above)
         g = ui.group(root, "illusion", "your engine runs on the phone with its hand made eval for now (no trained net yet)")

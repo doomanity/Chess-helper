@@ -357,15 +357,16 @@ class ChessService : Service(), SideBarHost, SharedPreferences.OnSharedPreferenc
         }
         val fr = squareRect(g, wb, mv.substring(0, 2)) ?: return
         val to = squareRect(g, wb, mv.substring(2, 4)) ?: return
-        // a short human-ish pause, and the chance to stop
-        Thread.sleep(250L + (Math.random() * 400).toLong())
+        // the wait before tapping you set (0 = none), a little uneven so it isn't robotic, and the chance to stop
+        val pause = cfg?.autoPauseMs ?: 0
+        if (pause > 0) Thread.sleep(pause + (Math.random() * minOf(150, pause / 2 + 1)).toLong())
         if (!autoPlay || paused || boardMoved()) return
         if (!tapAndWait(svc, fr.centerX(), fr.centerY())) return stopAuto("engine control tap failed, you play again")
-        Thread.sleep(140)
+        Thread.sleep(70)
         tapAndWait(svc, to.centerX(), to.centerY())
         if (mv.length == 5) {
             // the promotion picker opens on the promotion square: queen there, then knight, rook, bishop below it
-            Thread.sleep(450)
+            Thread.sleep(300)
             val k = "qnrb".indexOf(mv[4]).coerceAtLeast(0)
             tapAndWait(svc, to.centerX(), to.centerY() + k * to.height())
         }
@@ -860,7 +861,7 @@ class ChessService : Service(), SideBarHost, SharedPreferences.OnSharedPreferenc
         if (overlayShown) {
             // our own drawing would be part of the picture
             hideMove()
-            Thread.sleep(180)
+            Thread.sleep(100)
             f = look() ?: return Tracker.Step.UNREADABLE
         }
         val reads = BoardVision.readSquares(f.px, f.w, f.local)
@@ -980,12 +981,15 @@ class ChessService : Service(), SideBarHost, SharedPreferences.OnSharedPreferenc
 
         val cached = shownModel
         if (mode == Mode.NORMAL && shownFen == fen && cached != null) {
-            showModel(cached)
             val best = shownBest
             if (autoPlay && best != null) {
+                // tap first, the drawing settles while the move plays
+                showModel(cached, wait = false)
                 playForMe(best, fen, g, wb)
+                settleLater()
                 return step
             }
+            showModel(cached)
             runJudge(g, wb, fen, key, c)
             return step
         }
@@ -998,8 +1002,17 @@ class ChessService : Service(), SideBarHost, SharedPreferences.OnSharedPreferenc
                 Mode.RETHINK -> "thinking again..."
                 else -> "thinking..."
             })
-            val ms = if (mode == Mode.RETHINK) (c.thinkMs * 2.5f).toInt() else c.thinkMs
-            val a = adv.full(fen, c.nMoves, ms, threat = c.showThreat || c.botPlan, maxPower = mode == Mode.SAVE)
+            // engine control has its own short think; the threat and the bot's plan come after the arrows are up
+            val fast = autoPlay && mode == Mode.NORMAL
+            val ms = if (mode == Mode.RETHINK) (c.thinkMs * 2.5f).toInt() else if (fast) c.autoThinkMs else c.thinkMs
+            val myIll = illusion
+            val illMs = myIll?.thinkMs
+            if (fast) myIll?.thinkMs = c.autoThinkMs
+            val a = try {
+                adv.full(fen, c.nMoves, ms, threat = false, maxPower = mode == Mode.SAVE)
+            } finally {
+                if (myIll != null && illMs != null) myIll.thinkMs = illMs
+            }
             adv.listerError?.let { toast(if (c.useIllusion) "illusion: $it, using stockfish" else "maia3 pc not reachable ($it), using stockfish") }
             if (mode == Mode.NORMAL) storeAdvice(fen, a, c)
             a
@@ -1072,17 +1085,20 @@ class ChessService : Service(), SideBarHost, SharedPreferences.OnSharedPreferenc
         say("best: " + advice.cands.joinToString("  ") { "${Game.san(fen, it.move)} ${it.text}" })
         shownFen = fen
         shownModel = model
-        showModel(model)
         myTurnShown = true
         shownBest = advice.cands.first().move
         if (autoPlay) {
-            // engine control: play the engine's pick (the first move on the card) and leave the extras for later
+            // engine control: tap the engine's pick (the first move on the card) at once, the drawing settles while
+            // the move plays, the extras are left out
+            showModel(model, wait = false)
             playForMe(advice.cands.first().move, fen, g, wb)
+            settleLater()
             return step
         }
-        // the bot played a guessed move: its premove answer had no threat / plan search, add them now
+        showModel(model)
+        // the arrows are up: now the threat and the bot's plan (searched after, so the arrows come sooner)
         var onScreen = model
-        if (early != null && (c.showThreat || c.botPlan)) onScreen = addThreatAndPlan(fen, model, early, g, wb, c, adv)
+        if (c.showThreat || c.botPlan) onScreen = addThreatAndPlan(fen, model, early, g, wb, c, adv)
         runJudge(g, wb, fen, key, c)
         val shownNow = if (c.illusionBrilliant) huntBrilliant(fen, onScreen, advice, g, wb, c) else onScreen
         if (c.blunderSquares) showDanger(fen, shownNow, g, wb, c)
@@ -1715,7 +1731,7 @@ class ChessService : Service(), SideBarHost, SharedPreferences.OnSharedPreferenc
         const val AHEAD_JOBS = 120           // the most positions worked on ahead per move
         const val CHECK_MS = 2500L          // how often the board check compares the squares with the last read
         const val GUESS_MS = 180            // stockfish's search for the score and the bot's likely moves
-        private const val POLL = 120L // ms between looks at the screen
+        private const val POLL = 80L // ms between looks at the screen
     }
 
     override fun onDestroy() {

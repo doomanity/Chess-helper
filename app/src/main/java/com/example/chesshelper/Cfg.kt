@@ -40,6 +40,8 @@ class Cfg(p: SharedPreferences) {
     val reviewRating = p.getInt("review_rating", 1500)          // how the labels are judged (same setting as the review screen)
     val nMoves = p.getInt("n_moves", 3).coerceIn(1, 4)
     val thinkMs = p.getInt("think_ms", 700)
+    val autoThinkMs = p.getInt("auto_think_ms", 250)   // engine control: the engines' think per move (its own, short)
+    val autoPauseMs = p.getInt("auto_pause_ms", 0)     // engine control: the wait before tapping (0 = tap at once)
 
     // what to draw
     val showEval = p.getBoolean("show_eval", true)
