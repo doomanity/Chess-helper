@@ -163,28 +163,28 @@ class Tracker(var iAmWhite: Boolean, private val myTurnAtStart: Boolean) {
     }
 
     /**
-     * a piece of yours in your hand (held or being dragged): only your side's squares look different. your piece
-     * left its square (or still shows there), and up to 3 squares under your finger look like your piece, one of
-     * them maybe over an opponent piece. the opponent's pieces are all where they were
+     * a piece of yours in your hand (held or being dragged). the chess site also draws its own things then: the
+     * lifted piece under your finger, a frame on the square you hover, hint dots and rings around pieces you could
+     * take. so only the pieces we know count: at most one of yours is gone from its square (the one you hold) and at
+     * most one of the opponent's looks covered. extra things on empty squares are ignored. a real move by either
+     * side always takes a piece off its square and puts it on a known move's square, which the moves check finds
+     * before we get here
      */
     private fun looksHeld(known: Board, occ: IntArray): Boolean {
         val mine = if (meWhite()) BoardVision.WHITE else BoardVision.BLACK
+        val theirs = if (mine == BoardVision.WHITE) BoardVision.BLACK else BoardVision.WHITE
         val knownOcc = Game.occOf(known)
-        var left = 0
-        var under = 0
-        var covered = 0
+        var myGone = 0
+        var theirsGone = 0
+        var mineKnown = 0
+        var theirsKnown = 0
         for (i in 0 until 64) {
-            val k = knownOcc[i]
-            val o = occ[i]
-            if (k == o) continue
-            when {
-                k == mine && o == BoardVision.EMPTY -> left++
-                k == BoardVision.EMPTY && o == mine -> under++
-                k != BoardVision.EMPTY && k != mine && o == mine -> covered++
-                else -> return false // an opponent piece moved or vanished, or yours turned into theirs
+            when (knownOcc[i]) {
+                mine -> { mineKnown++; if (occ[i] != mine) myGone++ }
+                theirs -> { theirsKnown++; if (occ[i] != theirs) theirsGone++ }
             }
         }
-        return left <= 1 && under <= 3 && covered <= 1 && left + under + covered in 1..4
+        return mineKnown > 0 && theirsKnown > 0 && myGone <= 1 && theirsGone <= 1
     }
 
     /** the game we follow gets to the start position with a move or two (knights out and back home): not a new game */

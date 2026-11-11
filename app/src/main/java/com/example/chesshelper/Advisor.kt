@@ -19,12 +19,13 @@ class Advisor(private val sf: UciEngine, private val lister: MoveLister?) {
      * the moves to show plus the extras: eval bar, the opponent's threat, the main line.
      * maxPower = a "save": one move from stockfish at full power with a longer think, whatever the difficulty
      */
-    fun full(fen: String, n: Int, ms: Int = 700, threat: Boolean = true, maxPower: Boolean = false): Advice {
+    fun full(fen: String, n: Int, ms: Int = 700, threat: Boolean = true, maxPower: Boolean = false, quick: Boolean = false): Advice {
+        // quick = a first look to draw at once: stockfish alone, only the moves shown, the full think follows
         listerError = null
         // the other engine (illusion, maia3) thinks at the same time as stockfish, not after it
         val picked = ArrayList<String>()
         var pickErr: String? = null
-        val pickThread = if (lister != null && !maxPower) Thread {
+        val pickThread = if (lister != null && !maxPower && !quick) Thread {
             try {
                 picked.addAll(lister.topMoves(fen, n))
             } catch (e: IOException) {
@@ -34,7 +35,7 @@ class Advisor(private val sf: UciEngine, private val lister: MoveLister?) {
             }
         }.also { it.start() } else null
         val lines = try {
-            sf.analyse(fen, if (maxPower) maxOf(ms, 2500) else ms, if (maxPower) 1 else maxOf(8, n))
+            sf.analyse(fen, if (maxPower) maxOf(ms, 2500) else ms, if (maxPower) 1 else if (quick) maxOf(1, n) else maxOf(8, n))
         } finally {
             pickThread?.join()
         }
@@ -55,7 +56,7 @@ class Advisor(private val sf: UciEngine, private val lister: MoveLister?) {
         val picks = ArrayList<String>()
         picks.addAll(picked)
         listerError = pickErr
-        if (picks.isEmpty() && sf.isLimited) {
+        if (picks.isEmpty() && sf.isLimited && !quick) {
             // the difficulty setting makes stockfish play worse on purpose: its own pick goes first
             sf.playedMove(fen, ms)?.let { picks.add(it) }
         }
@@ -65,7 +66,7 @@ class Advisor(private val sf: UciEngine, private val lister: MoveLister?) {
         val best = top.score
         val out = ArrayList<Cand>()
         for ((i, mv) in chosen.withIndex()) {
-            val l = lines.firstOrNull { it.move == mv } ?: sf.evalMove(fen, mv, 250) ?: continue
+            val l = lines.firstOrNull { it.move == mv } ?: (if (quick) null else sf.evalMove(fen, mv, 250)) ?: continue
             val loss = maxOf(0, best - l.score)
             out.add(Cand(mv, l.score, l.mate, Grade.of(loss), i + 1))
         }

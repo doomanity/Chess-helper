@@ -479,6 +479,16 @@ fun holdDrag() {
             check(st == Tracker.Step.HOLD, "dragged piece should be held (white=$white, look $i), was $st")
         }
         check(tr.board?.fen == before, "holding a piece must not change the board (white=$white)")
+        // the site's own drawing while you hold: things on empty squares read as the opponent's color (hint dots,
+        // a hover frame), one opponent piece covered by a ring
+        val noisy = boardOf(dragged.fen)
+        val theirPawn = if (white) com.github.bhlangonijr.chesslib.Piece.BLACK_PAWN else com.github.bhlangonijr.chesslib.Piece.WHITE_PAWN
+        for (sq in listOf("A4", "C4", "B5")) noisy.setPiece(theirPawn, com.github.bhlangonijr.chesslib.Square.valueOf(sq))
+        for (i in 1..4) {
+            val st = ph.look(render(sc, noisy, null, null))
+            check(st == Tracker.Step.HOLD, "held piece with the site's hints should be held (white=$white, look $i), was $st")
+        }
+        check(tr.board?.fen == before, "the site's hints must not change the board (white=$white)")
         // you drop it: the real move is read
         val mv = playMove(truth, if (white) "d1h5" else "d8h4")
         ph.look(render(sc, truth, mv.from.ordinal, mv.to.ordinal))

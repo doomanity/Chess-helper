@@ -998,6 +998,7 @@ class ChessService : Service(), SideBarHost, SharedPreferences.OnSharedPreferenc
             return step
         }
         val adv = advisor ?: return step
+        var quickShown = false
         // the bot played the move we guessed: the answer is already worked out
         val early = if (mode == Mode.NORMAL) knownAdvice(fen, c) else null
         val advice = if (early != null) early else {
@@ -1009,6 +1010,19 @@ class ChessService : Service(), SideBarHost, SharedPreferences.OnSharedPreferenc
             // engine control has its own short think; the threat and the bot's plan come after the arrows are up
             val fast = autoPlay && mode == Mode.NORMAL
             val ms = if (mode == Mode.RETHINK) (c.thinkMs * 2.5f).toInt() else if (fast) c.autoThinkMs else c.thinkMs
+            // a quick first look (stockfish, about 150 ms) is drawn at once, the full think replaces it
+            if (mode == Mode.NORMAL && !fast && ms > QUICK_MS + 150) {
+                try {
+                    val q = adv.full(fen, c.nMoves, QUICK_MS, threat = false, quick = true)
+                    if (q.cands.isNotEmpty()) {
+                        showQuick(q, fen, g, wb, c)
+                        quickShown = true
+                    }
+                } catch (e: IllegalStateException) {
+                    throw e
+                } catch (e: Exception) {
+                }
+            }
             val myIll = illusion
             val illMs = myIll?.thinkMs
             if (fast) myIll?.thinkMs = c.autoThinkMs
@@ -1099,7 +1113,8 @@ class ChessService : Service(), SideBarHost, SharedPreferences.OnSharedPreferenc
             settleLater()
             return step
         }
-        showModel(model)
+        // after the quick look: the arrows change in place, no new entrance animation
+        showModel(model, restart = !quickShown)
         // the arrows are up: now the threat and the bot's plan (searched after, so the arrows come sooner)
         var onScreen = model
         if (c.showThreat || c.botPlan) onScreen = addThreatAndPlan(fen, model, advice, g, wb, c, adv)
@@ -1111,6 +1126,25 @@ class ChessService : Service(), SideBarHost, SharedPreferences.OnSharedPreferenc
             seedAhead(advice.cands.take(AHEAD_MINE).mapNotNull { cd -> Game.after(fen, cd.move)?.let { AheadJob(it, 1, true) } })
         }
         return step
+    }
+
+    /** the quick first look: the moves and the eval bar only, drawn while the full think runs */
+    private fun showQuick(a: Advice, fen: String, g: BoardGeom, wb: Boolean, c: Cfg) {
+        val moves = ArrayList<DrawMove>()
+        for (cand in a.cands) {
+            val fr = squareRect(g, wb, cand.move.substring(0, 2)) ?: continue
+            val to = squareRect(g, wb, cand.move.substring(2, 4)) ?: continue
+            moves.add(DrawMove(fr, to, cand.grade, cand.rank, Game.san(fen, cand.move), cand.text, cand.star))
+        }
+        if (moves.isEmpty()) return
+        val model = OverlayModel(
+            moves, boardRectOf(g), wb,
+            evalShare = if (c.showEval) a.whiteShare else null,
+            evalText = if (c.showEval) a.evalText else null,
+            title = "$engineName · thinking...",
+            accuracy = accText(c)
+        )
+        showModel(model, wait = false)
     }
 
     /** the threat and the bot's plan for a premove answer that was shown without them */
@@ -1734,6 +1768,7 @@ class ChessService : Service(), SideBarHost, SharedPreferences.OnSharedPreferenc
         const val AHEAD_MINE = 3             // your top moves followed while you think
         const val AHEAD_JOBS = 120           // the most positions worked on ahead per move
         const val CHECK_MS = 2500L          // how often the board check compares the squares with the last read
+        const val QUICK_MS = 150            // the quick first look on your turn, drawn before the full think
         const val GUESS_MS = 180            // stockfish's search for the score and the bot's likely moves
         private const val POLL = 80L // ms between looks at the screen
     }
