@@ -1098,7 +1098,7 @@ class ChessService : Service(), SideBarHost, SharedPreferences.OnSharedPreferenc
         showModel(model)
         // the arrows are up: now the threat and the bot's plan (searched after, so the arrows come sooner)
         var onScreen = model
-        if (c.showThreat || c.botPlan) onScreen = addThreatAndPlan(fen, model, early, g, wb, c, adv)
+        if (c.showThreat || c.botPlan) onScreen = addThreatAndPlan(fen, model, advice, g, wb, c, adv)
         runJudge(g, wb, fen, key, c)
         val shownNow = if (c.illusionBrilliant) huntBrilliant(fen, onScreen, advice, g, wb, c) else onScreen
         if (c.blunderSquares) showDanger(fen, shownNow, g, wb, c)
