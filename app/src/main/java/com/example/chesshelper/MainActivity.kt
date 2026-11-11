@@ -132,7 +132,7 @@ class MainActivity : Activity() {
 
         // ---- illusion's extra jobs (they work with any engine above)
         g = ui.group(root, "illusion", "your engine runs on the phone with its hand made eval for now (no trained net yet)")
-        g.add(ui.toggleRow("brilliant hunter", c.illusionBrilliant, "teal !! arrow when a brilliant move is on the board") { on -> save { it.putBoolean("illusion_brilliant", on) } })
+        g.add(ui.toggleRow("brilliant hunter", c.illusionBrilliant, "blue !! arrow when a brilliant move is on the board (illusion or stockfish)") { on -> save { it.putBoolean("illusion_brilliant", on) } })
         g.add(ui.toggleRow("guess the bot with illusion", c.illusionGuess, "its move is the first guess when maia3 is off") { on -> save { it.putBoolean("illusion_guess", on) } })
 
         // ---- on the board

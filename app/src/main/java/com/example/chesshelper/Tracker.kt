@@ -103,6 +103,7 @@ class Tracker(var iAmWhite: Boolean, private val myTurnAtStart: Boolean) {
     companion object {
         const val START_PLACEMENT = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR"
         const val MAX_PLY = 3
+        const val FAST_PLY = 8  // fast play: how many moves between two reads we can still follow
         const val HOLD_MS = 9000L   // the longest we wait out a premove picture or a lifted piece
         const val LOST_MS = 2500L   // how long a position we can't explain has to stay on screen before we start over
         const val SUSPECT = 3       // this many piece types that look wrong means our board is probably wrong
@@ -282,6 +283,29 @@ class Tracker(var iAmWhite: Boolean, private val myTurnAtStart: Boolean) {
                     bestHit = near[0]
                     bestOther = useOther
                     bestD = d
+                }
+            }
+        }
+        // nothing within 3 moves: you and the bot played fast. look further (up to FAST_PLY moves), the smart way
+        // (also when the only fit so far needed the wrong side to move or a misread square: a longer exact fit wins)
+        if ((bestHit == null || bestCost > 2 * (MAX_PLY + 1)) && !promoUnsure) {
+            for (d in MAX_PLY + 1..FAST_PLY) {
+                if (2 * d >= bestCost) break
+                val exact = Game.fastHits(known, occ, d, if (d <= 6) 60000 else 150000)
+                if (exact.isNotEmpty()) {
+                    val h = Game.pickNatural(exact, known, seenChess)
+                    // the piece types we see must agree, or it is a look-alike: better to check again than guess
+                    if (seenChess != null) {
+                        Game.play(known, h)
+                        val off = Game.typeMismatch(known, seenChess)
+                        repeat(h.path.size) { known.undoMove() }
+                        if (off > 2) break
+                    }
+                    bestHit = h
+                    bestCost = 2 * d
+                    bestOther = false
+                    bestD = d
+                    break
                 }
             }
         }

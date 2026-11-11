@@ -508,6 +508,30 @@ fun holdDrag() {
     }
 }
 
+/** you and the bot both fast: 4 to 7 moves pass between two reads, in the opening and later on */
+fun fastPlay() {
+    println("== fast play: several moves between two reads")
+    val line = ("e2e4 e7e5 g1f3 b8c6 f1b5 a7a6 b5a4 g8f6 e1g1 f8e7 f1e1 b7b5 a4b3 d7d6 c2c3 e8g8 h2h3 c6a5 b3c2 c7c5 " +
+        "d2d4 d8c7 b1d2 c5d4 c3d4 a5c6 d2b3 a6a5 c1e3 a5a4 b3d2 c8d7 a1c1 c7b7").split(" ")
+    for (white in listOf(true, false)) for ((gi, gap) in listOf(4, 5, 6, 7).withIndex()) {
+        val sc = Scene(looks[gi % looks.size], 1189, 2576, 78, 918, 1032, white, Random(60L + gi))
+        val truth = Board(); val tr = Tracker(white, true); tr.autoColor = true; val ph = Phone(tr, sc)
+        ph.look(render(sc, truth, null, null))
+        var i = 0
+        var worst = 0L
+        var ok = true
+        while (i < line.size) {
+            var last: com.github.bhlangonijr.chesslib.move.Move? = null
+            for (k in 0 until gap) { if (i >= line.size) break; last = playMove(truth, line[i]); i++ }
+            val t0 = System.nanoTime()
+            val st = ph.look(render(sc, truth, last?.from?.ordinal, last?.to?.ordinal))
+            worst = maxOf(worst, (System.nanoTime() - t0) / 1_000_000)
+            if (!samePosition(tr, truth)) { ok = false; check(false, "fast play gap $gap (white=$white) after ply $i: $st\n    truth   ${truth.fen}\n    tracker ${tr.board?.fen}"); break }
+        }
+        if (ok) println("  ${if (white) "white" else "black"}, $gap moves between reads: followed the whole game (slowest read ${worst} ms) ok")
+    }
+}
+
 /** the lost-track case: the misread queen moves like a knight before we had a second look */
 fun promoLost() {
     println("== misread promotion, then the piece moves")
@@ -683,6 +707,7 @@ fun main(args: Array<String>) {
     sideSwitch()
     premoveHold()
     holdDrag()
+    fastPlay()
     midGame()
     println("== simulated games")
     var seed = 100L

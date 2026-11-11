@@ -1050,10 +1050,10 @@ class ChessService : Service(), SideBarHost, SharedPreferences.OnSharedPreferenc
             val to = rect(cand.move.substring(2, 4)) ?: continue
             // illusion's own pick is tagged: ✦ (its move) or ⚑ (a trap for the opponent's rating)
             val ill = illusion
-            val tag = if (c.useIllusion && ill != null && early == null && cand.move == ill.lastPick) {
-                if (ill.lastWasBrilliant) " !!" else if (ill.lastWasTrap) " ⚑" else " ✦"
-            } else ""
-            moves.add(DrawMove(fr, to, cand.grade, cand.rank, Game.san(fen, cand.move) + tag, cand.text, cand.star))
+            val illPick = c.useIllusion && ill != null && early == null && cand.move == ill.lastPick
+            val bril = illPick && ill!!.lastWasBrilliant && sane(cand)
+            val tag = if (illPick && !bril) { if (ill!!.lastWasTrap) " ⚑" else " ✦" } else ""
+            moves.add(DrawMove(fr, to, cand.grade, cand.rank, Game.san(fen, cand.move) + tag, cand.text, cand.star, bril))
         }
         val line = ArrayList<LineStep>()
         if (c.showLine && advice.cands.firstOrNull()?.move == advice.lineFor) {
@@ -1176,31 +1176,40 @@ class ChessService : Service(), SideBarHost, SharedPreferences.OnSharedPreferenc
      * sacrifice, judged like the move labels. if one is found it gets a teal "!!" arrow and the card says so.
      * returns the picture now on the screen
      */
+    /** a move flagged brilliant still has to be a decent move by stockfish (no "brilliant" blunders) */
+    private fun sane(cand: Cand): Boolean = cand.grade != Grade.BLUNDER
+
+    /**
+     * brilliant moves among your arrows: illusion's "brilliant move !!" flag, or stockfish's check (the move labels'
+     * brilliant rule: a sound sacrifice). the arrow turns blue with "!!". illusion is only asked again when it isn't
+     * already the engine for your moves (then its flag came with the arrows)
+     */
     private fun huntBrilliant(fen: String, model: OverlayModel, advice: Advice, g: BoardGeom, wb: Boolean, c: Cfg): OverlayModel {
-        val ill = illusion ?: return model
-        val rv = review ?: return model
-        val picks = LinkedHashSet<String>()
+        if (model.moves.any { it.brilliant }) return model // illusion flagged one of the arrows already
+        val rv = review
         var found: String? = null
-        try {
-            // in human mode illusion hunts sound sacrifices itself and says "brilliant move !!": trust that flag
-            val l = ill.best(fen, maxOf(400, c.thinkMs), c.illusionHuman, c.maiaElo)
-            if (l != null) {
-                if (ill.lastFlaggedBrilliant) found = l.move else picks.add(l.move)
+        val ill = illusion
+        if (ill != null && !(c.useIllusion && ill.lastPick != null)) {
+            try {
+                val l = ill.best(fen, maxOf(300, c.thinkMs / 2), c.illusionHuman, c.maiaElo)
+                if (l != null && ill.lastFlaggedBrilliant) {
+                    val cand = advice.cands.firstOrNull { it.move == l.move }
+                    if (cand == null || sane(cand)) found = l.move
+                }
+            } catch (e: Exception) {
             }
-        } catch (e: Exception) {
-            return model
         }
-        // our own check (the move labels' brilliant rule) as the backup
-        if (found == null) advice.cands.firstOrNull()?.let { picks.add(it.move) }
-        if (found == null) for (mv in picks) {
-            if (boardMoved()) return model
+        // stockfish's check on your top 3 arrows (a sacrifice that stays sound)
+        if (found == null && rv != null) for (cand in advice.cands.take(3)) {
+            if (!sane(cand)) continue
+            if (boardMoved() || lastModel !== model) return model
             val lab = try {
-                rv.peek(fen, mv, 250, c.reviewRating)
+                rv.peek(fen, cand.move, 250, c.reviewRating)
             } catch (e: Exception) {
                 null
             }
             if (lab == Label.BRILLIANT) {
-                found = mv
+                found = cand.move
                 break
             }
         }
@@ -1208,7 +1217,7 @@ class ChessService : Service(), SideBarHost, SharedPreferences.OnSharedPreferenc
         val fr = squareRect(g, wb, mv.substring(0, 2)) ?: return model
         val to = squareRect(g, wb, mv.substring(2, 4)) ?: return model
         if (lastModel !== model || boardMoved()) return model
-        val next = model.withBrilliant(fr, to, Game.san(fen, mv))
+        val next = model.withBrilliantMove(fr, to, Game.san(fen, mv))
         shownModel = next
         showModel(next, restart = false)
         return next

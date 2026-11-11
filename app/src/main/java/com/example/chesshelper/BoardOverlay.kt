@@ -22,8 +22,11 @@ import kotlin.math.sin
 /** one suggested move to draw: where it goes (screen pixel rectangles), how good it is, and what the list says */
 class DrawMove(
     val from: RectF, val to: RectF, val grade: Int, val rank: Int, val label: String, val eval: String,
-    val star: Boolean = false
-)
+    val star: Boolean = false,
+    val brilliant: Boolean = false   // a brilliant move (illusion's flag or stockfish's check): blue arrow with "!!"
+) {
+    fun asBrilliant() = DrawMove(from, to, grade, rank, label, eval, star, true)
+}
 
 /** one move of the main line after the best move (n = 1 is the opponent's reply, then us, then them) */
 class LineStep(val from: RectF, val to: RectF, val n: Int, val mine: Boolean)
@@ -76,6 +79,22 @@ class OverlayModel(
     fun withBrilliant(from: RectF, to: RectF, san: String) =
         copy(brilFrom = from, brilTo = to, alert = alert ?: "!! brilliant move: $san", alertColor = if (alert != null) alertColor else Label.BRILLIANT.color)
 
+    /**
+     * a brilliant move: if it is one of the arrows, that arrow turns blue with "!!", otherwise its own blue arrow.
+     * the card says so, unless it shows a critical moment
+     */
+    fun withBrilliantMove(from: RectF, to: RectF, san: String): OverlayModel {
+        val i = moves.indexOfFirst { it.from == from && it.to == to }
+        val al = alert ?: "!! brilliant move: $san"
+        val ac = if (alert != null) alertColor else Label.BRILLIANT.color
+        if (i < 0) return copy(brilFrom = from, brilTo = to, alert = al, alertColor = ac)
+        val ms = moves.mapIndexed { k, m -> if (k == i) m.asBrilliant() else m }
+        return OverlayModel(
+            ms, board, whiteBottom, evalShare, evalText, threatFrom, threatTo, line, title, accuracy,
+            guesses, danger, hanging, plan, al, ac, brilFrom, brilTo
+        )
+    }
+
     /** the same picture with new guesses (answers filled in) */
     fun withGuesses(gs: List<GuessDraw>) = copy(guesses = gs)
 
@@ -107,6 +126,7 @@ class OverlayLook(
 class BoardOverlay(ctx: Context) : View(ctx) {
     companion object {
         val PREDICT = Color.rgb(200, 206, 222) // the bot's guessed move: soft grey-white
+        val BRILLIANT_BLUE = Color.rgb(30, 167, 255) // a brilliant move's arrow and "!!" badge
         const val ALERT_SECONDS = 2.2f
 
         /** guess 1, 2, 3 and the premove that answers it share a color (and a number) */
@@ -147,7 +167,7 @@ class BoardOverlay(ctx: Context) : View(ctx) {
     private val regular: Typeface = Typeface.create("sans-serif", Typeface.NORMAL)
     private val medium: Typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
 
-    private fun gradeColor(m: DrawMove): Int = if (m.star) Theme.GOLD else gradeColor(m.grade)
+    private fun gradeColor(m: DrawMove): Int = if (m.brilliant) BRILLIANT_BLUE else if (m.star) Theme.GOLD else gradeColor(m.grade)
 
     private fun gradeColor(grade: Int): Int = when (grade) {
         Grade.BEST -> Color.rgb(0, 200, 83)        // dark green
@@ -347,11 +367,12 @@ class BoardOverlay(ctx: Context) : View(ctx) {
             text.textSize = r * 1.3f
             text.textAlign = Paint.Align.CENTER
             text.isFakeBoldText = true
-            text.color = if (m.grade == Grade.DECENT || m.grade == Grade.OK || m.star) Color.BLACK else Color.WHITE
-            c.drawText(if (m.star) "★" else m.rank.toString(), bx, by + r * 0.46f, text)
+            text.color = if (!m.brilliant && (m.grade == Grade.DECENT || m.grade == Grade.OK || m.star)) Color.BLACK else Color.WHITE
+            if (m.brilliant) text.textSize = r * 1.05f
+            c.drawText(if (m.brilliant) "!!" else if (m.star) "★" else m.rank.toString(), bx, by + r * (if (m.brilliant) 0.38f else 0.46f), text)
             text.isFakeBoldText = false
             text.color = Color.WHITE
-            if (m.grade == Grade.BLUNDER && !m.star) skull(c, m.to.right - sq * 0.2f, m.to.bottom - sq * 0.2f, r * 1.1f)
+            if (m.grade == Grade.BLUNDER && !m.star && !m.brilliant) skull(c, m.to.right - sq * 0.2f, m.to.bottom - sq * 0.2f, r * 1.1f)
         }
     }
 
@@ -426,7 +447,7 @@ class BoardOverlay(ctx: Context) : View(ctx) {
     /** the brilliant move the hunter found: a thick teal arrow, the square lit, and a "!!" badge */
     private fun drawBrilliant(c: Canvas, from: RectF, to: RectF) {
         val sq = to.width()
-        val teal = Label.BRILLIANT.color
+        val teal = BRILLIANT_BLUE
         fill.color = Theme.withAlpha(teal, (70 * drawP).toInt())
         c.drawRoundRect(to, sq * 0.12f, sq * 0.12f, fill)
         arrow(c, from, to, teal, sq * 0.1f * look.arrowSize, 0.95f, false)
@@ -871,8 +892,8 @@ class BoardOverlay(ctx: Context) : View(ctx) {
             text.textSize = rowH * 0.4f
             text.textAlign = Paint.Align.CENTER
             text.isFakeBoldText = true
-            text.color = if (mv.grade == Grade.DECENT || mv.grade == Grade.OK || mv.star) Color.BLACK else Color.WHITE
-            c.drawText(if (mv.star) "★" else mv.rank.toString(), dotX, cy + rowH * 0.14f, text)
+            text.color = if (!mv.brilliant && (mv.grade == Grade.DECENT || mv.grade == Grade.OK || mv.star)) Color.BLACK else Color.WHITE
+            c.drawText(if (mv.brilliant) "!!" else if (mv.star) "★" else mv.rank.toString(), dotX, cy + rowH * 0.14f, text)
             text.isFakeBoldText = false
             text.color = Color.WHITE
             text.textSize = rowH * 0.5f
