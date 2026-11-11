@@ -20,6 +20,8 @@ class Cfg(p: SharedPreferences) {
     val illusionTolerance = p.getInt("illusion_tolerance", 60)    // 0..300: the most a trap may cost vs the best move
     val illusionBrilliant = p.getBoolean("illusion_brilliant", true) // illusion hunts brilliant moves on your turn
     val illusionGuess = p.getBoolean("illusion_guess", true)      // illusion guesses the bot's move when maia3 is off
+    val thinkAhead = p.getBoolean("think_ahead", true)           // works on the likely game 10 moves ahead in spare time
+    val remember = p.getBoolean("remember", true)                 // keeps worked out positions on the phone, across games
     val controlButton = p.getBoolean("control_button", true)      // the floating play / stop button for engine control
     val needIllusion: Boolean get() = useIllusion || illusionBrilliant || (illusionGuess && !useMaia)
     val maiaHost = (p.getString("maia_host", "") ?: "").trim()

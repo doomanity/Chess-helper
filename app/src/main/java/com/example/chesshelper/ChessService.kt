@@ -101,7 +101,22 @@ class ChessService : Service(), SideBarHost, SharedPreferences.OnSharedPreferenc
     private var pendingAcc: Triple<String, String, Boolean>? = null // position before, position after, mover is white
 
     // the bot's guessed move, and our answer worked out early for the position it leads to
-    private val ready = HashMap<String, Advice>()
+    // your answers worked out ahead of time, by position (the premoves and the deep line). the oldest go when full
+    private val ready = object : LinkedHashMap<String, Advice>(256, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, Advice>?) = size > READY_MAX
+    }
+    // the bot's likely moves, by position (the deep line and the bot's turn share them)
+    private val guessCache = object : LinkedHashMap<String, List<Pair<String, Float?>>>(256, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, List<Pair<String, Float?>>>?) = size > READY_MAX
+    }
+    // positions remembered across games (on the phone)
+    private var memory: AdviceMemory? = null
+    @Volatile private var wantForget = false
+    // the deep line: positions to work on in spare time, nearest first
+    private class AheadJob(val fen: String, val ply: Int, val botTurn: Boolean)
+    private val ahead = ArrayDeque<AheadJob>()
+    private val aheadSeen = HashSet<String>()
+    private var aheadDone = 0
     private var predShownKey: String? = null
     private var predModel: OverlayModel? = null
 
@@ -240,6 +255,10 @@ class ChessService : Service(), SideBarHost, SharedPreferences.OnSharedPreferenc
         val c = Cfg.load(this)
         cfg = c
         if (key == "ctl_x" || key == "ctl_y") return // the floating button was moved
+        if (key == "forget_memory") {
+            wantForget = true // the worker clears it (the memory belongs to its thread)
+            return
+        }
         if (key == "control_button") {
             if (c.controlButton && controlBtn == null) {
                 controlBtn = ControlButton(this, wm) { toggleAuto() }.also { it.show(); it.playing = autoPlay }
@@ -434,6 +453,8 @@ class ChessService : Service(), SideBarHost, SharedPreferences.OnSharedPreferenc
             else if (remote != null) "maia3 ${c.maiaElo}" + (if (c.maiaHuman > 0) " · human ${c.maiaHuman}%" else "")
             else if (c.elo < UciEngine.MAX_ELO) "stockfish ${c.elo}" else "stockfish"
         ready.clear()
+        guessCache.clear()
+        ahead.clear()
         predShownKey = null
         advisor = Advisor(sf, ill ?: remote)
         tracker?.iAmWhite = c.iAmWhite
@@ -499,6 +520,106 @@ class ChessService : Service(), SideBarHost, SharedPreferences.OnSharedPreferenc
 
     private fun thumbOf(f: Frame) = BoardVision.thumb(f.px, f.w, f.h, f.local)
 
+    /** what your answers depend on: a different engine, strength or style never reuses another's answer */
+    private fun adviceSig(c: Cfg): String {
+        val style = if (c.useIllusion && c.illusionHuman) "|${c.illusionAggression},${c.illusionContempt},${c.illusionTolerance}" else ""
+        return "$engineName|${c.nMoves}$style"
+    }
+
+    /** what the bot guesses depend on: maia3 at the bot's rating, illusion, or stockfish */
+    private fun guessSig(c: Cfg): String = when {
+        remote != null -> "maia${c.maiaElo}"
+        c.illusionGuess && illusion != null -> "ill"
+        else -> "sf"
+    }
+
+    /** an answer worked out before: this session first, then the phone's memory */
+    private fun knownAdvice(fen: String, c: Cfg): Advice? {
+        val k = Game.posKey(fen)
+        ready[k]?.let { return it }
+        if (!c.remember) return null
+        val m = memory?.advice(k, adviceSig(c)) ?: return null
+        ready[k] = m
+        return m
+    }
+
+    private fun storeAdvice(fen: String, a: Advice, c: Cfg) {
+        if (a.cands.isEmpty()) return
+        val k = Game.posKey(fen)
+        ready[k] = a
+        if (c.remember) memory?.putAdvice(k, adviceSig(c), a)
+    }
+
+    private fun knownGuesses(fen: String, c: Cfg): List<Pair<String, Float?>>? {
+        val k = Game.posKey(fen)
+        guessCache[k]?.let { return it }
+        if (!c.remember) return null
+        return memory?.guesses(k, guessSig(c))?.also { guessCache[k] = it }
+    }
+
+    private fun storeGuesses(fen: String, g: List<Pair<String, Float?>>, c: Cfg) {
+        if (g.isEmpty()) return
+        val k = Game.posKey(fen)
+        guessCache[k] = g
+        if (c.remember) memory?.putGuesses(k, guessSig(c), g)
+    }
+
+    /** starts a new deep line from these positions (all are reached from the position on the screen) */
+    private fun seedAhead(jobs: List<AheadJob>) {
+        ahead.clear()
+        aheadSeen.clear()
+        aheadDone = 0
+        for (j in jobs) if (aheadSeen.add(Game.posKey(j.fen) + j.botTurn)) ahead.addLast(j)
+    }
+
+    /**
+     * one step of thinking ahead, done in spare time (the screen is calm). a bot position: its 2 likely moves (from
+     * the memory or a quick search) lead to your positions. your position: your answer (from the memory or a short
+     * think), and the bot position after it. nearest first, up to 10 half moves ahead
+     */
+    private fun aheadStep(c: Cfg) {
+        val job = ahead.removeFirstOrNull() ?: return
+        if (aheadDone++ >= AHEAD_JOBS || job.ply >= AHEAD_PLIES) {
+            if (aheadDone >= AHEAD_JOBS) ahead.clear()
+            return
+        }
+        val sf = stockfish ?: return
+        if (job.botTurn) {
+            val g = knownGuesses(job.fen, c) ?: run {
+                val r = remote
+                val got = try {
+                    if (r != null) r.opponentGuesses(job.fen, c.maiaElo, AHEAD_GUESSES)
+                    else sf.analyse(job.fen, 150, AHEAD_GUESSES).map { Pair<String, Float?>(it.move, null) }
+                } catch (e: Exception) {
+                    emptyList()
+                }
+                storeGuesses(job.fen, got, c)
+                got
+            }
+            for ((mv, _) in g.take(AHEAD_GUESSES)) {
+                val next = Game.after(job.fen, mv) ?: continue
+                if (aheadSeen.add(Game.posKey(next) + false)) ahead.addLast(AheadJob(next, job.ply + 1, false))
+            }
+        } else {
+            val adv = advisor ?: return
+            val a = knownAdvice(job.fen, c) ?: run {
+                val ill = illusion
+                val illMs = ill?.thinkMs
+                ill?.thinkMs = PREMOVE_ILLUSION_MS
+                val got = try {
+                    adv.full(job.fen, c.nMoves, maxOf(250, (c.thinkMs * 0.4f).toInt()), threat = false)
+                } finally {
+                    if (ill != null && illMs != null) ill.thinkMs = illMs
+                }
+                storeAdvice(job.fen, got, c)
+                got
+            }
+            val best = a.cands.firstOrNull()?.move ?: return
+            val next = Game.after(job.fen, best) ?: return
+            if (aheadSeen.add(Game.posKey(next) + true)) ahead.addLast(AheadJob(next, job.ply + 1, true))
+        }
+    }
+
     /**
      * starts an engine again if its program died (android may kill a busy background program, especially with two
      * engines running, or it crashed). the board reading goes on, and the next move uses the new engine
@@ -553,6 +674,7 @@ class ChessService : Service(), SideBarHost, SharedPreferences.OnSharedPreferenc
             null
         }
         review = LiveReview(stockfish ?: return, book)
+        memory = AdviceMemory(File(filesDir, "advice_memory.tsv")).also { it.load() }
         val tr = Tracker(c0.iAmWhite, c0.myTurnAtStart)
         tr.autoColor = c0.autoColor
         tracker = tr
@@ -572,6 +694,12 @@ class ChessService : Service(), SideBarHost, SharedPreferences.OnSharedPreferenc
                         applyEngineSettings()
                     }
                     reviveEngines()
+                    if (wantForget) {
+                        wantForget = false
+                        memory?.clear()
+                        ready.clear()
+                        guessCache.clear()
+                    }
                     if (panelOpen) {
                         // the menu covers the screen: don't read it, just wait
                         Thread.sleep(200)
@@ -666,7 +794,18 @@ class ChessService : Service(), SideBarHost, SharedPreferences.OnSharedPreferenc
                         if (!justCosmetic(f)) due = true
                     }
                     if (!due) {
-                        Thread.sleep(POLL)
+                        // spare time: think ahead (one position at a time, so a move on the board is seen quickly)
+                        val cc = cfg
+                        if (cc != null && cc.thinkAhead && ahead.isNotEmpty() && !paused && !panelOpen) {
+                            try {
+                                aheadStep(cc)
+                            } catch (e: Exception) {
+                                if (e is InterruptedException) throw e
+                                ahead.clear()
+                            }
+                        } else {
+                            Thread.sleep(POLL)
+                        }
                         continue
                     }
                     moving = false
@@ -852,7 +991,7 @@ class ChessService : Service(), SideBarHost, SharedPreferences.OnSharedPreferenc
         }
         val adv = advisor ?: return step
         // the bot played the move we guessed: the answer is already worked out
-        val early = if (mode == Mode.NORMAL) ready[key] else null
+        val early = if (mode == Mode.NORMAL) knownAdvice(fen, c) else null
         val advice = if (early != null) early else {
             say(when (mode) {
                 Mode.SAVE -> "max power: thinking hard..."
@@ -862,9 +1001,9 @@ class ChessService : Service(), SideBarHost, SharedPreferences.OnSharedPreferenc
             val ms = if (mode == Mode.RETHINK) (c.thinkMs * 2.5f).toInt() else c.thinkMs
             val a = adv.full(fen, c.nMoves, ms, threat = c.showThreat || c.botPlan, maxPower = mode == Mode.SAVE)
             adv.listerError?.let { toast(if (c.useIllusion) "illusion: $it, using stockfish" else "maia3 pc not reachable ($it), using stockfish") }
+            if (mode == Mode.NORMAL) storeAdvice(fen, a, c)
             a
         }
-        ready.clear()
         if (advice.cands.isEmpty()) {
             say("no move found, game over?")
             runJudge(g, wb, fen, key, c)
@@ -947,6 +1086,10 @@ class ChessService : Service(), SideBarHost, SharedPreferences.OnSharedPreferenc
         runJudge(g, wb, fen, key, c)
         val shownNow = if (c.illusionBrilliant) huntBrilliant(fen, onScreen, advice, g, wb, c) else onScreen
         if (c.blunderSquares) showDanger(fen, shownNow, g, wb, c)
+        // while you think: work on the bot's replies to your top moves, and on from there
+        if (c.thinkAhead) {
+            seedAhead(advice.cands.take(AHEAD_MINE).mapNotNull { cd -> Game.after(fen, cd.move)?.let { AheadJob(it, 1, true) } })
+        }
         return step
     }
 
@@ -1143,11 +1286,13 @@ class ChessService : Service(), SideBarHost, SharedPreferences.OnSharedPreferenc
         if (!c.predict && !c.showAcc && !c.showLabels) return
         val sf = stockfish ?: return
 
+        // guesses worked out ahead (the deep line or the memory): no need to ask again
+        val cachedG = if (c.predict) knownGuesses(fen, c)?.takeIf { it.size >= GUESSES } else null
         // maia3 on the pc guesses the bot's moves while stockfish scores the position: both at the same time
-        val r = if (c.predict) remote else null
+        val r = if (c.predict && cachedG == null) remote else null
         var fromPc: List<Pair<String, Float?>>? = null
         // without maia3, illusion's move becomes the first guess (it thinks while stockfish does)
-        val ill = if (c.predict && r == null && c.illusionGuess) illusion else null
+        val ill = if (c.predict && cachedG == null && r == null && c.illusionGuess) illusion else null
         var fromIll: String? = null
         val illThread = ill?.let { e ->
             Thread {
@@ -1168,7 +1313,7 @@ class ChessService : Service(), SideBarHost, SharedPreferences.OnSharedPreferenc
         }
         // one search gives the score (eval bar, accuracy) and, without maia3, the guesses
         val lines = try {
-            sf.analyse(fen, GUESS_MS, if (c.predict) GUESSES else 1)
+            sf.analyse(fen, GUESS_MS, if (c.predict && cachedG == null) GUESSES else 1)
         } catch (e: IllegalStateException) {
             emptyList()
         }
@@ -1189,7 +1334,8 @@ class ChessService : Service(), SideBarHost, SharedPreferences.OnSharedPreferenc
         illThread?.join(800)
         val sfGuesses = lines.map { Pair<String, Float?>(it.move, null) }
         val illFirst = fromIll?.let { listOf(Pair<String, Float?>(it, null)) } ?: emptyList()
-        val raw = fromPc?.takeIf { it.isNotEmpty() } ?: (illFirst + sfGuesses)
+        val raw = cachedG ?: fromPc?.takeIf { it.isNotEmpty() } ?: (illFirst + sfGuesses)
+        if (cachedG == null) storeGuesses(fen, raw.distinctBy { it.first }.take(GUESSES), c)
 
         val gs = ArrayList<Guess>()
         for ((mv, prob) in raw) {
@@ -1225,7 +1371,6 @@ class ChessService : Service(), SideBarHost, SharedPreferences.OnSharedPreferenc
 
         // your answer to each guess, most likely first, with a short think each. stop as soon as the bot moves
         // (the screen then still differs from the last calm picture, so the main loop reads it right away)
-        ready.clear()
         val adv = advisor
         var shown: OverlayModel = model
         // premoves have to be quick: no threat / plan search here (that comes right after your move shows), and
@@ -1238,9 +1383,8 @@ class ChessService : Service(), SideBarHost, SharedPreferences.OnSharedPreferenc
             if (boardMoved()) return
             say("bot will likely play ${x.san} · getting your answer ready")
             val ms = if (i == 0) maxOf(300, (c.thinkMs * 0.5f).toInt()) else maxOf(250, (c.thinkMs * 0.35f).toInt())
-            val a = adv.full(x.after, c.nMoves, ms, threat = false)
+            val a = knownAdvice(x.after, c) ?: adv.full(x.after, c.nMoves, ms, threat = false).also { storeAdvice(x.after, it, c) }
             if (a.cands.isEmpty()) continue
-            ready[Game.posKey(x.after)] = a
             if (!c.premove) continue
             val best = a.cands.first()
             answers[i] = Game.san(x.after, best.move)
@@ -1259,6 +1403,17 @@ class ChessService : Service(), SideBarHost, SharedPreferences.OnSharedPreferenc
         say("your answers are ready: " + gs.joinToString("  ") { it.san })
         // the label of the move you just played comes last: the premoves matter more right now
         runJudge(g, wb, fen, key, c)
+        // the deep line: from each guess and your answer to it, on toward 10 half moves ahead, while the bot thinks
+        if (c.thinkAhead) {
+            val jobs = ArrayList<AheadJob>()
+            for (x in gs) {
+                val a = ready[Game.posKey(x.after)]
+                val best = a?.cands?.firstOrNull()?.move
+                val next = best?.let { Game.after(x.after, it) }
+                if (next != null) jobs.add(AheadJob(next, 2, true)) else jobs.add(AheadJob(x.after, 1, false))
+            }
+            seedAhead(jobs)
+        }
     }
 
     /** one guess of the bot's next move */
@@ -1286,6 +1441,7 @@ class ChessService : Service(), SideBarHost, SharedPreferences.OnSharedPreferenc
         lastPosKey = null
         pendingAcc = null
         ready.clear()
+        ahead.clear()
         predShownKey = null
         predModel = null
         lastFen = null
@@ -1552,6 +1708,11 @@ class ChessService : Service(), SideBarHost, SharedPreferences.OnSharedPreferenc
     companion object {
         const val GUESSES = 3 // how many of the bot's likely moves to show while it thinks
         const val PREMOVE_ILLUSION_MS = 250 // illusion's think for one premove
+        const val READY_MAX = 600            // answers kept in the phone's memory while the helper runs
+        const val AHEAD_PLIES = 10           // how far the deep line looks (half moves)
+        const val AHEAD_GUESSES = 2          // the bot's top moves followed at every bot move in the deep line
+        const val AHEAD_MINE = 3             // your top moves followed while you think
+        const val AHEAD_JOBS = 120           // the most positions worked on ahead per move
         const val CHECK_MS = 2500L          // how often the board check compares the squares with the last read
         const val GUESS_MS = 180            // stockfish's search for the score and the bot's likely moves
         private const val POLL = 120L // ms between looks at the screen
@@ -1570,6 +1731,7 @@ class ChessService : Service(), SideBarHost, SharedPreferences.OnSharedPreferenc
         stockfish?.close()
         remote?.close()
         illusion?.close()
+        memory?.save()
         super.onDestroy()
     }
 }

@@ -105,6 +105,20 @@ class MainActivity : Activity() {
         }
         g.add(ui.sliderRow("think time", 300, 2000, 100, c.thinkMs, { "$it ms" }) { v -> save { it.putInt("think_ms", v) } })
 
+        // ---- thinking ahead and remembering
+        val memCount = try {
+            java.io.File(filesDir, "advice_memory.tsv").let { f -> if (f.exists()) f.useLines { it.count() } else 0 }
+        } catch (_: Exception) { 0 }
+        g = ui.group(root, "think ahead", "in spare time the helper follows the likely game 10 half moves ahead (the bot's top 2 moves at each turn, your best answer), while the bot thinks and while you think. when the game follows it, your move shows at once. remembered positions stay on the phone, so openings the bots repeat are instant next game too. uses more battery")
+        g.add(ui.toggleRow("think ahead", c.thinkAhead, "deep line, 10 half moves") { on -> save { it.putBoolean("think_ahead", on) } })
+        g.add(ui.toggleRow("remember positions", c.remember, "$memCount stored on the phone") { on -> save { it.putBoolean("remember", on) } })
+        g.add(ui.buttonRow("forget remembered positions", ui.red) {
+            save { it.putLong("forget_memory", System.currentTimeMillis()) }
+            try { java.io.File(filesDir, "advice_memory.tsv").delete() } catch (_: Exception) {}
+            toast("forgot all remembered positions")
+            root.post { rebuild() }
+        })
+
         // ---- engine control
         g = ui.group(root, "engine control", "the floating play button lets the engine play your moves by tapping the board. only against computer bots: chess sites ban accounts that do this against people. if android greys the switch out, open app info > ⋮ > allow restricted settings first")
         g.add(ui.navRow("allow engine control", if (TapService.instance != null) "on" else "off") {
