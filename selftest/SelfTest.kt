@@ -447,6 +447,57 @@ fun premoveHold() {
     }
 }
 
+/**
+ * holding or dragging one of your pieces on your turn: the piece leaves its square and shows up under your finger
+ * (over empty squares and maybe an opponent piece). the tracker must wait (HOLD) for as long as you hold, never
+ * start over, then read the real move when you drop it. also a new game whose start picture has one misread
+ * square still starts, the right way up
+ */
+fun holdDrag() {
+    println("== holding and dragging a piece, and a start with one misread square")
+    for (white in listOf(true, false)) {
+        val sc = Scene(looks[0], 1189, 2576, 78, 918, 1032, white, Random(51))
+        val truth = Board(); val tr = Tracker(white, true); tr.autoColor = true; val ph = Phone(tr, sc)
+        ph.look(render(sc, truth, null, null))
+        val opening = if (white) "e2e4 e7e5" else "e2e4 e7e5 g1f3"
+        for (u in opening.split(" ")) { val mv = playMove(truth, u); ph.look(render(sc, truth, mv.from.ordinal, mv.to.ordinal)) }
+        val before = tr.board?.fen
+        // your queen in your hand: gone from its square, drawn over two empty squares and one opponent piece
+        val sqs = if (white) listOf("D1", "H5", "G4", "E5") else listOf("D8", "H4", "G5", "F3")
+        val dragged = boardOf(truth.fen)
+        val q = dragged.getPiece(com.github.bhlangonijr.chesslib.Square.valueOf(sqs[0]))
+        dragged.unsetPiece(q, com.github.bhlangonijr.chesslib.Square.valueOf(sqs[0]))
+        for (sq in sqs.drop(1)) {
+            val at = com.github.bhlangonijr.chesslib.Square.valueOf(sq)
+            val there = dragged.getPiece(at)
+            if (there != com.github.bhlangonijr.chesslib.Piece.NONE) dragged.unsetPiece(there, at)
+            dragged.setPiece(q, at)
+        }
+        // held for about 4 seconds (longer than the "lost" wait)
+        for (i in 1..6) {
+            val st = ph.look(render(sc, dragged, null, null))
+            check(st == Tracker.Step.HOLD, "dragged piece should be held (white=$white, look $i), was $st")
+        }
+        check(tr.board?.fen == before, "holding a piece must not change the board (white=$white)")
+        // you drop it: the real move is read
+        val mv = playMove(truth, if (white) "d1h5" else "d8h4")
+        ph.look(render(sc, truth, mv.from.ordinal, mv.to.ordinal))
+        check(samePosition(tr, truth), "the move after holding (white=$white)\n    truth   ${truth.fen}\n    tracker ${tr.board?.fen}")
+        // a new game with the other color, and one square of the start picture misread (a piece hidden)
+        val sc2 = Scene(looks[1], 1189, 2576, 78, 918, 1032, !white, Random(52))
+        val ph2 = Phone(tr, sc2)
+        val start = Board()
+        val hide = com.github.bhlangonijr.chesslib.Square.valueOf("B7")
+        val misread = boardOf(start.fen); misread.unsetPiece(misread.getPiece(hide), hide)
+        val st = ph2.look(render(sc2, misread, null, null))
+        check(st == Tracker.Step.STARTED && tr.whiteBottom == !white && tr.meWhite() == !white,
+            "start with one misread square should start a new game as ${if (!white) "white" else "black"} (was $st, whiteBottom=${tr.whiteBottom})")
+        ph2.look(render(sc2, start, null, null))
+        check(samePosition(tr, start), "start position after the misread square (white=$white)")
+        println("  ${if (white) "white" else "black"}: dragged piece held 4s then the move read; misread start ok")
+    }
+}
+
 /** the lost-track case: the misread queen moves like a knight before we had a second look */
 fun promoLost() {
     println("== misread promotion, then the piece moves")
@@ -621,6 +672,7 @@ fun main(args: Array<String>) {
     promoLost()
     sideSwitch()
     premoveHold()
+    holdDrag()
     midGame()
     println("== simulated games")
     var seed = 100L

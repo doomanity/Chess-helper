@@ -152,10 +152,39 @@ class Tracker(var iAmWhite: Boolean, private val myTurnAtStart: Boolean) {
 
     /** true if the screen shows exactly the start position: white at the bottom (true), at the top (false), or not (null) */
     private fun startOrientation(screen: IntArray): Boolean? {
+        // one misread square is allowed (a highlight, a marker or an intro animation on one square). any real
+        // position after a move differs by two squares or more, and the board turned around differs by 32
         val start = Game.startOcc()
-        if (Game.mismatch(Game.screenToChess(screen, true), start) == 0) return true
-        if (Game.mismatch(Game.screenToChess(screen, false), start) == 0) return false
+        val up = Game.mismatch(Game.screenToChess(screen, true), start)
+        val down = Game.mismatch(Game.screenToChess(screen, false), start)
+        if (up <= 1 && down > 1) return true
+        if (down <= 1 && up > 1) return false
         return null
+    }
+
+    /**
+     * a piece of yours in your hand (held or being dragged): only your side's squares look different. your piece
+     * left its square (or still shows there), and up to 3 squares under your finger look like your piece, one of
+     * them maybe over an opponent piece. the opponent's pieces are all where they were
+     */
+    private fun looksHeld(known: Board, occ: IntArray): Boolean {
+        val mine = if (meWhite()) BoardVision.WHITE else BoardVision.BLACK
+        val knownOcc = Game.occOf(known)
+        var left = 0
+        var under = 0
+        var covered = 0
+        for (i in 0 until 64) {
+            val k = knownOcc[i]
+            val o = occ[i]
+            if (k == o) continue
+            when {
+                k == mine && o == BoardVision.EMPTY -> left++
+                k == BoardVision.EMPTY && o == mine -> under++
+                k != BoardVision.EMPTY && k != mine && o == mine -> covered++
+                else -> return false // an opponent piece moved or vanished, or yours turned into theirs
+            }
+        }
+        return left <= 1 && under <= 3 && covered <= 1 && left + under + covered in 1..4
     }
 
     /** the game we follow gets to the start position with a move or two (knights out and back home): not a new game */
@@ -264,16 +293,6 @@ class Tracker(var iAmWhite: Boolean, private val myTurnAtStart: Boolean) {
         if (hit0 != null && bestOther && bestD == 1 && botsTurn && turnSure && whiteBottom != null && !heldTooLong(screen, nowMs)) {
             return Step.HOLD
         }
-        // a piece you are holding: one of your squares is empty and nothing else changed
-        if (hit0 == null) {
-            val knownOcc = Game.occOf(known)
-            val diff = (0 until 64).filter { knownOcc[it] != occ[it] }
-            if (diff.size == 1 && occ[diff[0]] == 0) {
-                val p = known.getPiece(com.github.bhlangonijr.chesslib.Square.squareAt(diff[0]))
-                val mine = p != com.github.bhlangonijr.chesslib.Piece.NONE && (p.pieceSide == Side.WHITE) == meWhite()
-                if (mine && !heldTooLong(screen, nowMs)) return Step.HOLD
-            }
-        }
         if (hit0 != null) holdScreen = null
         val hit = hit0
         if (System.getProperty("tdebug") != null) println("        [trk] known=${known.fen} mis0=${Game.mismatch(Game.occOf(known), occ)} -> other=$bestOther d=$bestD cost=$bestCost mis=${hit?.mis} path=${hit?.path}")
@@ -342,6 +361,12 @@ class Tracker(var iAmWhite: Boolean, private val myTurnAtStart: Boolean) {
                     }
                 }
             }
+        }
+        // a piece you are holding or dragging: only your side's squares look different. we wait, never start over
+        // (checked after the promoted pieces, so a misread promoted piece that moved is fixed first)
+        if (looksHeld(known, occ)) {
+            clearMisses()
+            if (!heldTooLong(screen, nowMs)) return Step.HOLD
         }
         val ms = missScreen
         if (ms == null || Game.mismatch(ms, screen) > 0) {

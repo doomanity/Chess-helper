@@ -778,7 +778,9 @@ class ChessService : Service(), SideBarHost, SharedPreferences.OnSharedPreferenc
                                 continue
                             }
                             moving = true
-                            hideMove()
+                            // on your turn the change is you touching or moving a piece: keep the arrows up while
+                            // you do (they are hidden for a moment when the board is read)
+                            if (!myTurnShown) hideMove()
                         }
                         Thread.sleep(POLL)
                         continue
@@ -872,6 +874,7 @@ class ChessService : Service(), SideBarHost, SharedPreferences.OnSharedPreferenc
         }
         lastCls = cls
         lastReads = reads
+        val wasMyTurnShown = myTurnShown
         myTurnShown = false
         var step = tracker.update(cls, reads, now)
         if (step == Tracker.Step.STARTED) savesLeft = c.savesPerGame
@@ -919,6 +922,7 @@ class ChessService : Service(), SideBarHost, SharedPreferences.OnSharedPreferenc
             say("waiting for the bot (premove) or your move...")
             debugLine(tracker, step)
             lastModel?.let { showModel(it, restart = false) }
+            myTurnShown = wasMyTurnShown
             return step
         }
 
