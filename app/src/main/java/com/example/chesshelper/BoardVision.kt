@@ -81,7 +81,10 @@ object BoardVision {
                 // otherwise this is some other squarish area that happens to look like a board
                 val sameColors = (dist(an.a, top[i]) <= 40 && dist(an.b, top[j]) <= 40) ||
                     (dist(an.a, top[j]) <= 40 && dist(an.b, top[i]) <= 40)
-                if (an.score >= 0.85 && sameColors && an.score * g.size > bestScore) {
+                // textured boards (marble, wood) score lower: a board as wide as most of the screen is surely
+                // the board, so it may score a little less
+                val need = if (g.size >= w * 0.6) 0.72 else 0.85
+                if (an.score >= need && sameColors && an.score * g.size > bestScore) {
                     bestScore = an.score * g.size
                     best = g
                 }

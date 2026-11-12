@@ -13,6 +13,16 @@ fun main(args: Array<String>) {
     val stepMs = args.getOrNull(1)?.toLong() ?: 500L
     val tr = Tracker(true, true)
     tr.autoColor = true
+    // optional: a start position picture to learn the piece shapes from first (like the shapes saved on the phone)
+    args.getOrNull(2)?.let { p ->
+        val img = ImageIO.read(File(p)); val w = img.width; val h = img.height
+        val px = img.getRGB(0, 0, w, h, null, 0, w)
+        val g = BoardVision.findBoard(px, w, h, null)!!
+        val reads = BoardVision.readSquares(px, w, g)
+        val shapes = Tracker(true, true)
+        shapes.update(BoardVision.classify(reads)!!, reads, 1)
+        tr.templates.decode(shapes.templates.encode())
+    }
     var geom: BoardGeom? = null
     var clock = 1000L
     var lastFen = ""
@@ -23,7 +33,7 @@ fun main(args: Array<String>) {
         val px = img.getRGB(0, 0, w, h, null, 0, w)
         clock += stepMs
         val g = BoardVision.findBoard(px, w, h, geom)
-        if (g == null) { println("${f.name} board not found"); continue }
+        if (g == null) { println("${f.name} board not found"); geom = null; continue }
         geom = g
         val reads = BoardVision.readSquares(px, w, g)
         val cls = BoardVision.classify(reads)

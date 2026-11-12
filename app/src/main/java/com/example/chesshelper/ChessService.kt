@@ -78,6 +78,7 @@ class ChessService : Service(), SideBarHost, SharedPreferences.OnSharedPreferenc
 
     // what we know about the screen
     private var geom: BoardGeom? = null           // the board, in screen pixels
+    private var lastGeom: BoardGeom? = null       // where the board last was (kept when a read can't confirm it)
     private var region = IntArray(0)              // pixels of the board area (reused every frame)
     @Volatile private var prevThumb: IntArray? = null
     private var lastCls: IntArray? = null         // piece colors at the last frame we processed
@@ -521,7 +522,7 @@ class ChessService : Service(), SideBarHost, SharedPreferences.OnSharedPreferenc
     /** the board area of the screen: pixels plus where the board is inside them. abs is in screen pixels */
     private class Frame(val px: IntArray, val w: Int, val h: Int, val local: BoardGeom, val abs: BoardGeom)
 
-    private fun regionFrame(bmp: Bitmap, g: BoardGeom): Frame? {
+    private fun regionFrame(bmp: Bitmap, g: BoardGeom, minScore: Double = 0.6): Frame? {
         if (g.left < 0 || g.top < 0 || g.left + g.size > screenW || g.top + g.size > screenH) return null
         val m = (g.size * 0.06f).toInt()
         val rx = maxOf(0, g.left - m)
@@ -532,7 +533,7 @@ class ChessService : Service(), SideBarHost, SharedPreferences.OnSharedPreferenc
         if (region.size != rw * rh) region = IntArray(rw * rh)
         bmp.getPixels(region, 0, rw, rx, ry, rw, rh)
         val local = BoardGeom(g.left - rx, g.top - ry, g.size)
-        if (BoardVision.scoreGeom(region, rw, rh, local) < 0.7) return null
+        if (BoardVision.scoreGeom(region, rw, rh, local) < minScore) return null
         return Frame(region, rw, rh, local, g)
     }
 
@@ -544,8 +545,18 @@ class ChessService : Service(), SideBarHost, SharedPreferences.OnSharedPreferenc
         val px = IntArray(screenW * screenH)
         bmp.getPixels(px, 0, screenW, 0, 0, screenW, screenH)
         val g = BoardVision.findBoard(px, screenW, screenH, null)
-        geom = g
-        return if (g == null) null else regionFrame(bmp, g)
+        if (g != null) {
+            geom = g
+            lastGeom = g
+            return regionFrame(bmp, g)
+        }
+        // not found fresh: the board doesn't move during a game, so the last place it was still counts when it
+        // looks fairly board-like there (highlights, premove squares, a textured board lower the score; the side
+        // menu over it does not pass)
+        val keep = lastGeom ?: return null
+        regionFrame(bmp, keep, 0.5)?.let { geom = keep; return it }
+        geom = null
+        return null
     }
 
     private fun thumbOf(f: Frame) = BoardVision.thumb(f.px, f.w, f.h, f.local)
