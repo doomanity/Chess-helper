@@ -532,6 +532,30 @@ fun fastPlay() {
     }
 }
 
+/** moves taken back (a coach rewinding, a takeback): the tracker goes back to that earlier position */
+fun takeback() {
+    println("== takebacks: the coach rewinds")
+    val line = "e2e4 e7e5 g1f3 b8c6 f1c4 g8f6 f3g5 d7d5 e4d5 f6d5 g5f7 e8f7".split(" ")
+    for (white in listOf(true, false)) {
+        val sc = Scene(looks[0], 1189, 2576, 78, 918, 1032, white, Random(70))
+        val tr = Tracker(white, true); tr.autoColor = true; val ph = Phone(tr, sc)
+        val truth = Board()
+        ph.look(render(sc, truth, null, null))
+        for (u in line) { val mv = playMove(truth, u); ph.look(render(sc, truth, mv.from.ordinal, mv.to.ordinal)) }
+        // back 2 moves
+        val back2 = Board(); for (u in line.dropLast(2)) playMove(back2, u)
+        var st = ph.look(render(sc, back2, null, null))
+        check(st == Tracker.Step.MOVED && samePosition(tr, back2), "back 2 moves (white=$white): $st\n    truth   ${back2.fen}\n    tracker ${tr.board?.fen}")
+        // back 5 more, and a different move played right away
+        val back7 = Board(); for (u in line.dropLast(7)) playMove(back7, u)
+        val alt = playMove(back7, if (back7.sideToMove == com.github.bhlangonijr.chesslib.Side.WHITE) "b1c3" else "h7h6")
+        st = ph.look(render(sc, back7, alt.from.ordinal, alt.to.ordinal))
+        check(samePosition(tr, back7), "back 7 moves and a new move (white=$white): $st\n    truth   ${back7.fen}\n    tracker ${tr.board?.fen}")
+        check(tr.playedMoves.size == line.size - 7 + 1, "the record is cut back (white=$white): ${tr.playedMoves.size} moves")
+        println("  ${if (white) "white" else "black"}: back 2, back 7 + a new move, record cut back ok")
+    }
+}
+
 /** the lost-track case: the misread queen moves like a knight before we had a second look */
 fun promoLost() {
     println("== misread promotion, then the piece moves")
@@ -708,6 +732,7 @@ fun main(args: Array<String>) {
     premoveHold()
     holdDrag()
     fastPlay()
+    takeback()
     midGame()
     println("== simulated games")
     var seed = 100L

@@ -38,15 +38,48 @@ object HaikuParse {
         return if (score > 0.0) true else if (score < 0.0) false else claim
     }
 
+    /**
+     * the 8 board rows from the reply, forgiving about how they are written: spaces or bars between squares,
+     * rank numbers at the ends, other marks for an empty square (- _ · 0), a digit for several empty squares
+     * (like in a FEN). a row that came out 7 or 9 long is padded or cut when that is only empty squares
+     */
+    fun rowsOf(reply: String): List<String>? {
+        val rows = ArrayList<String>()
+        for (raw in reply.lines()) {
+            var t = raw.trim().trim('`', '"', '\'').trim()
+            if (t.isEmpty() || t.contains(':')) continue
+            t = t.replace(Regex("^[1-8]\\s*[|:]?\\s*(?=[prnbqkPRNBQK.\\-_·0 ]{8,})"), "")   // a rank number in front
+            t = t.replace(Regex("(\\s+|\\s*\\|\\s*)[1-8]$"), "")                              // or after it
+            t = t.replace("|", "").replace(" ", "").replace(",", "")
+                .replace('-', '.').replace('_', '.').replace('·', '.').replace('0', '.')
+            if (t.any { it.isDigit() }) t = buildString { for (ch in t) if (ch.isDigit()) repeat(ch - '0') { append('.') } else append(ch) }
+            if (!t.all { it in "prnbqkPRNBQK." }) continue
+            t = when {
+                t.length == 8 -> t
+                t.length == 7 -> "$t."
+                t.length == 9 && t.endsWith('.') -> t.dropLast(1)
+                t.length == 9 && t.startsWith('.') -> t.drop(1)
+                else -> continue
+            }
+            rows.add(t)
+        }
+        return if (rows.size >= 8) rows.takeLast(8) else null
+    }
+
+    /** a FEN in the reply ("7k/7p/6p1/..."): its 8 rows, top first */
+    fun fenRows(reply: String): List<String>? {
+        val m = Regex("([prnbqkPRNBQK1-8]{1,8}/){7}[prnbqkPRNBQK1-8]{1,8}").find(reply) ?: return null
+        val rows = m.value.split("/").map { r -> buildString { for (ch in r) if (ch.isDigit()) repeat(ch - '0') { append('.') } else append(ch) } }
+        return if (rows.size == 8 && rows.all { it.length == 8 }) rows else null
+    }
+
     fun parse(reply: String): AiRead? {
         lastDebug = ""
-        val rowRegex = Regex("^[prnbqkPRNBQK.]{8}$")
-        val rows = reply.lines().map { it.trim().trim('`').trim() }.filter { rowRegex.matches(it) }
-        if (rows.size < 8) {
+        val grid = rowsOf(reply) ?: fenRows(reply)
+        if (grid == null) {
             lastDebug = "no 8-row board in the reply: " + reply.trim().takeLast(140)
             return null
         }
-        val grid = rows.takeLast(8)
 
         val bottom = Regex("BOTTOM:[\\s*`]*(white|black)", RegexOption.IGNORE_CASE).find(reply)
             ?.groupValues?.get(1)?.lowercase()
