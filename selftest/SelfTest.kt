@@ -630,6 +630,38 @@ fun multiPremove() {
     }
 }
 
+/** the full read fixes a wrong square: a piece gone without a move we saw, a piece of the wrong type */
+fun selfHeal() {
+    println("== the full read fixes a wrong square")
+    for (white in listOf(true, false)) {
+        val sc = Scene(looks[0], 1189, 2576, 78, 918, 1032, white, Random(95))
+        val truth = Board(); val tr = Tracker(white, true); tr.autoColor = true; val ph = Phone(tr, sc)
+        ph.look(render(sc, truth, null, null))
+        val opening = if (white) "e2e4 e7e5 g1f3 b8c6" else "e2e4 e7e5 g1f3 b8c6 f1c4"
+        for (u in opening.split(" ")) { val mv = playMove(truth, u); ph.look(render(sc, truth, mv.from.ordinal, mv.to.ordinal)) }
+        // the screen shows a bot piece of another type than we think (a bishop where we have its knight)
+        val botKnight = if (white) "C6" else "F3"
+        val wrongType = boardOf(truth.fen)
+        val sq = com.github.bhlangonijr.chesslib.Square.valueOf(botKnight)
+        val kn = wrongType.getPiece(sq)
+        wrongType.unsetPiece(kn, sq)
+        wrongType.setPiece(if (white) com.github.bhlangonijr.chesslib.Piece.BLACK_BISHOP else com.github.bhlangonijr.chesslib.Piece.WHITE_BISHOP, sq)
+        var fixed = false
+        for (i in 1..5) { ph.look(render(sc, wrongType, null, null)); if (tr.board?.fen?.substringBefore(' ') == wrongType.fen.substringBefore(' ')) { fixed = true; break } }
+        check(fixed, "a piece of another type gets fixed by the full read (white=$white)\n    screen  ${wrongType.fen}\n    tracker ${tr.board?.fen}")
+        check(tr.board?.sideToMove == truth.sideToMove, "the turn stays (white=$white)")
+        // one of your pieces gone with no move seen (taken while we didn't look)
+        val mySq = com.github.bhlangonijr.chesslib.Square.valueOf(if (white) "B1" else "B8")
+        val gone = boardOf(wrongType.fen)
+        gone.unsetPiece(gone.getPiece(mySq), mySq)
+        fixed = false
+        var looksNeeded = 0
+        for (i in 1..12) { ph.look(render(sc, gone, null, null)); looksNeeded = i; if (tr.board?.fen?.substringBefore(' ') == gone.fen.substringBefore(' ')) { fixed = true; break } }
+        check(fixed && looksNeeded >= 4, "a missing piece of yours is fixed, after a wait (white=$white): looks $looksNeeded\n    screen  ${gone.fen}\n    tracker ${tr.board?.fen}")
+        println("  ${if (white) "white" else "black"}: wrong type fixed, missing piece fixed after ${looksNeeded} reads ok")
+    }
+}
+
 /** the lost-track case: the misread queen moves like a knight before we had a second look */
 fun promoLost() {
     println("== misread promotion, then the piece moves")
@@ -809,6 +841,7 @@ fun main(args: Array<String>) {
     takeback()
     noAiMidGame()
     multiPremove()
+    selfHeal()
     midGame()
     println("== simulated games")
     var seed = 100L

@@ -81,6 +81,8 @@ use it against computer bots only: chess.com and lichess ban accounts that let a
 
 the phone reads the board by itself, no AI and no api cost. it checks the screen many times a second and follows every move from the piece shapes it learns at a game's start position. the shapes are saved, so a later session opened in the middle of a game reads it at once (whose turn it is comes from a king in check or the site's last move highlight). it follows fast play (up to 8 moves between two reads), takebacks (a coach rewinding), premoves and a piece held in your hand.
 
+every read also checks the whole board against a full read of every piece (from the learned shapes). when that read is sure of every piece and stays the same for a moment (about a second, 4 seconds when only one of your pieces is missing since that is usually your hand on it) while the followed board says something else, the read wins. so a wrong square fixes itself instead of staying wrong.
+
 every suggestion is checked to be a legal move in the position on screen before it is drawn or saved, so an old game's arrows can never show up.
 
 the AI (claude) is only a backup, off by default ("ask the AI when stuck" under reading the board, needs an api key). before the shapes are learned the first time, show a game's start position once.

@@ -329,7 +329,85 @@ class Tracker(var iAmWhite: Boolean, private val myTurnAtStart: Boolean) {
      * screen = 64 values (0 empty, 1 white, 2 black), row 0 is the top of the screen.
      * reads = what the vision saw per square (for the piece shapes), nowMs = a clock (any unit of milliseconds)
      */
+    /**
+     * one read of the screen. the moves are followed as before, and then the board is checked against a full read
+     * of every piece (the shapes we learned): when that read is sure of every piece, makes a legal set of pieces and
+     * stays the same for a moment while our board says something else, the read wins. so one wrong square can never
+     * stay wrong
+     */
     fun update(screen: IntArray, reads: Array<SquareRead>? = null, nowMs: Long = 0L): Step {
+        val step = follow(screen, reads, nowMs)
+        if (reads == null || retrying || step == Step.HOLD || step == Step.STARTED || step == Step.NEED_AI) {
+            if (step != Step.HOLD) snapPlacement = null
+            return step
+        }
+        return checkWithFullRead(screen, reads, nowMs) ?: step
+    }
+
+    // the full read that disagrees with our board, since when, and how many reads in a row
+    private var snapPlacement: String? = null
+    private var snapSince = 0L
+    private var snapReads = 0
+
+    /** every piece read from its shape, as a FEN placement. null when any piece isn't recognized for sure */
+    fun fullRead(screen: IntArray, reads: Array<SquareRead>, wb: Boolean): String? {
+        if (!templates.complete) return null
+        val seen = templates.recognizeAll(reads, screen)
+        for (i in 0 until 64) if (screen[i] != BoardVision.EMPTY && seen[i] == 0) return null
+        val placement = Game.placementFromTypes(Game.screenToChess(screen, wb), Game.screenToChess(seen, wb))
+        return if (Game.isValidPlacement(placement)) placement else null
+    }
+
+    private fun checkWithFullRead(screen: IntArray, reads: Array<SquareRead>, nowMs: Long): Step? {
+        val b = board ?: return null
+        val wb = whiteBottom ?: return null
+        val read = fullRead(screen, reads, wb)
+        val ours = Game.placement(b)
+        if (read == null || read == ours) {
+            snapPlacement = null
+            return null
+        }
+        if (read != snapPlacement) {
+            snapPlacement = read
+            snapSince = nowMs
+            snapReads = 1
+            return null
+        }
+        snapReads++
+        val readB = Game.newBoard(read, true)
+        // the bot's turn and only your pieces differ: your premoves drawn early, the moves settle them, not the read
+        val mine = if (meWhite()) BoardVision.WHITE else BoardVision.BLACK
+        val botsTurn = (b.sideToMove == Side.WHITE) != meWhite()
+        if (botsTurn) {
+            val a = Game.occOf(b)
+            val r = Game.occOf(readB)
+            val onlyMine = (0 until 64).any { a[it] != r[it] } && (0 until 64).all { a[it] == r[it] || (a[it] != BoardVision.EMPTY && a[it] == mine && r[it] != (3 - mine)) ||
+                (a[it] == BoardVision.EMPTY && r[it] == mine) || (a[it] == 3 - mine && r[it] == mine) }
+            if (onlyMine) return null
+        }
+        // a piece of yours missing from its square is often your hand on it: wait longer before believing that
+        val onlyMineGone = run {
+            val a = Game.occOf(b)
+            val r = Game.occOf(readB)
+            (0 until 64).any { a[it] != r[it] } && (0 until 64).all { a[it] == r[it] || (a[it] == mine && r[it] == BoardVision.EMPTY) }
+        }
+        val needMs = if (onlyMineGone) 4000L else 1200L
+        val stable = if (nowMs == 0L) snapReads >= (if (onlyMineGone) 6 else 3) else snapReads >= 2 && nowMs - snapSince >= needMs
+        if (!stable) return null
+        // the read wins. whose turn: a king in check, else the turn we were following (the moves knew it)
+        val whiteToMove = Game.turnFromChecks(read) ?: (b.sideToMove == Side.WHITE)
+        val nb = Game.newBoard(read, whiteToMove)
+        board = nb
+        restartLog(nb)
+        clearMisses()
+        snapPlacement = null
+        needsVerify = false
+        suspicious = 0
+        lastPlies = 0
+        return Step.RESET
+    }
+
+    private fun follow(screen: IntArray, reads: Array<SquareRead>?, nowMs: Long): Step {
         // a new game: the start position on the screen, either way up. the way it faces says which side is yours
         // (the app shows your pieces at the bottom), so a game as black after a game as white just works
         val startWb = startOrientation(screen)
@@ -520,7 +598,7 @@ class Tracker(var iAmWhite: Boolean, private val myTurnAtStart: Boolean) {
                     }
                     retrying = true
                     try {
-                        val again = update(screen, reads, nowMs)
+                        val again = follow(screen, reads, nowMs)
                         if (again != Step.UNREADABLE && again != Step.RESYNC) return again
                     } finally {
                         retrying = false
