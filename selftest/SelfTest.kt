@@ -218,9 +218,10 @@ fun realShots(dir: String) {
     // lost the game completely (the screen is many moves later): start over from the pictures, no AI
     var step = Tracker.Step.UNREADABLE
     var t = 2000L
-    for (i in 0 until 4) { t += 900; step = tr.update(d.cls, d.reads, t) }
-    println("  many moves later, after waiting: $step")
-    check(step == Tracker.Step.RESET, "should have started over from the pictures (got $step)")
+    var reset = false
+    for (i in 0 until 4) { t += 900; step = tr.update(d.cls, d.reads, t); if (step == Tracker.Step.RESET) reset = true }
+    println("  many moves later: started over from the pictures = $reset, now $step")
+    check(reset && tr.board?.let { Game.placement(it) } == boardOf(dotsFen).fen.substringBefore(' '), "should have started over from the pictures (got $step, ${tr.board?.fen})")
     check(tr.board != null && Game.placement(tr.board!!) == dotsFen.substringBefore(' '), "board rebuilt from the pictures is wrong: ${tr.board?.fen}")
     // and keeps following from there: black plays Nf6-e4, then the check position is 3 plies later
     t += 900

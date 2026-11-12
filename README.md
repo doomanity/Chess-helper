@@ -86,7 +86,7 @@ the board reading is the 1.12 one with fixes found by replaying a real recorded 
 - castling while only the king has moved on screen (a castling premove, or the rook still sliding)
 - takebacks (a coach rewinding): the earlier position is found again
 
-it learns the piece shapes at a game's start position, follows the moves, and asks the AI (claude, needs an api key, "ask the AI when stuck") when it starts in the middle of a game or loses track.
+once it knows the piece shapes (learned at a game's start position and saved), every read is also a full read of every piece. that full read is the truth for where the pieces are: when it is sure of every piece and the same on two reads in a row while the followed board says something else, the board becomes what it shows (whose turn: a king in check, whose pieces changed, or the last move highlight). so a wrong board fixes itself in about half a second and losing track, or starting mid-game, needs no AI. the moves are still followed for whose turn it is, castling and the move list. it only asks the AI (claude, needs an api key, "ask the AI when stuck") when it starts in the middle of a game or loses track.
 
 every suggestion is checked to be a legal move in the position on screen before it is drawn or saved, so an old game's arrows can never show up.
 

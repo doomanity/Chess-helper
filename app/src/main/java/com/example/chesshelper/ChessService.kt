@@ -719,7 +719,7 @@ class ChessService : Service(), SideBarHost, SharedPreferences.OnSharedPreferenc
             pf.edit().putBoolean("memory_wipe_v121", true).apply()
         }
         val tr = Tracker(c0.iAmWhite, c0.myTurnAtStart)
-        // 1.24: the 1.12 reading learns the shapes fresh each session (they are still saved, for the new reading)
+        loadShapes(tr) // the shapes learned before: the full read works from the first look
         tr.autoColor = c0.autoColor
         tracker = tr
 

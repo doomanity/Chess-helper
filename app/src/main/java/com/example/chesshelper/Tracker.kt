@@ -186,7 +186,157 @@ class Tracker(var iAmWhite: Boolean, private val myTurnAtStart: Boolean) {
      * screen = 64 values (0 empty, 1 white, 2 black), row 0 is the top of the screen.
      * reads = what the vision saw per square (for the piece shapes), nowMs = a clock (any unit of milliseconds)
      */
+    /**
+     * one read of the screen. the moves are followed (that knows whose turn it is, castling, the move list), and
+     * the result is checked against a full read of every piece (the learned shapes). once the shapes are learned,
+     * that full read is the truth for where the pieces are: when it is sure of every piece, legal, and the same on
+     * two reads in a row while our board says something else, the board becomes what the read shows. so a wrong
+     * board can't stay wrong, and losing track never needs the AI
+     */
     fun update(screen: IntArray, reads: Array<SquareRead>? = null, nowMs: Long = 0L): Step {
+        val before = board?.let { Board().apply { loadFromFen(it.fen) } }
+        val step = follow(screen, reads, nowMs)
+        if (reads == null || step == Step.HOLD || step == Step.STARTED) {
+            if (step != Step.HOLD) truthRead = null
+            return step
+        }
+        // the moves this read added to the list (taken back if the full read disagrees with them)
+        val added = if (step == Step.MOVED) lastPlies else 0
+        val base = if (step == Step.RESET || step == Step.NEED_AI) null else before
+        return trustFullRead(screen, reads, nowMs, base, added) ?: step
+    }
+
+    // the full read that disagrees with our board, and since when
+    private var truthRead: String? = null
+    private var truthSince = 0L
+    private var truthCount = 0
+
+    /** every piece read from its shape, as a FEN placement. null when any piece isn't recognized for sure */
+    fun fullRead(screen: IntArray, reads: Array<SquareRead>, wb: Boolean): String? {
+        if (!templates.complete) return null
+        val seen = templates.recognizeAll(reads, screen)
+        for (i in 0 until 64) if (screen[i] != BoardVision.EMPTY && seen[i] == 0) return null
+        val placement = Game.placementFromTypes(Game.screenToChess(screen, wb), Game.screenToChess(seen, wb))
+        return if (Game.isValidPlacement(placement)) placement else null
+    }
+
+    private fun trustFullRead(screen: IntArray, reads: Array<SquareRead>, nowMs: Long, before: Board?, added: Int): Step? {
+        val wb = whiteBottom ?: BoardVision.whiteBottomOf(screen) ?: return null
+        val read = fullRead(screen, reads, wb) ?: return null
+        val cur = board
+        if (cur != null && Game.placement(cur) == read) {
+            truthRead = null
+            return null
+        }
+        if (read != truthRead) {
+            truthRead = read
+            truthSince = nowMs
+            truthCount = 1
+            return null
+        }
+        truthCount++
+        // the old board to compare with: what we had before this read (or now, if there was none)
+        val old = before ?: cur
+        val mine = if (whiteBottom ?: wb) BoardVision.WHITE else BoardVision.BLACK
+        val theirs = 3 - mine
+        val readB = Game.newBoard(read, true)
+        val a = old?.let { Game.occOf(it) }
+        val r = Game.occOf(readB)
+        // only one of your pieces gone and nothing new anywhere: usually your hand on it, give it 3 seconds
+        val handOnPiece = a != null && (0 until 64).count { a[it] != r[it] } == 1 &&
+            (0 until 64).any { a[it] == mine && r[it] == BoardVision.EMPTY }
+        val waited = if (nowMs == 0L) truthCount >= (if (handOnPiece) 5 else 2)
+            else truthCount >= 2 && (!handOnPiece || nowMs - truthSince >= 3000L)
+        if (!waited) return null
+
+        // whose turn: a king in check must move; else whose pieces changed (the side that moved waits); else the
+        // site's last move highlight; else as it was
+        var mineChanged = false
+        var theirsChanged = false
+        if (a != null) for (i in 0 until 64) {
+            if (a[i] == r[i]) continue
+            if (a[i] == mine || r[i] == mine) mineChanged = true
+            if (a[i] == theirs || (r[i] == theirs && a[i] != mine)) theirsChanged = true
+        }
+        val meW = mine == BoardVision.WHITE
+        val whiteToMove = Game.turnFromChecks(read)
+            ?: when {
+                mineChanged && !theirsChanged -> !meW   // you moved: the bot's turn
+                theirsChanged && !mineChanged -> meW    // the bot moved: yours
+                else -> lastMoverWhite(screen, reads, wb)?.not() ?: (old?.sideToMove == Side.WHITE)
+            }
+        // keep the move list when real moves (up to 3) lead there, else start the list from here
+        if (old != null) {
+            for (d in 1..3) {
+                val hit = Game.hitsAt(old, Game.occOf(readB), d).firstOrNull { h ->
+                    Game.play(old, h)
+                    val ok = Game.placement(old) == read
+                    repeat(h.path.size) { old.undoMove() }
+                    ok
+                }
+                if (hit != null) {
+                    if (whiteBottom == null) whiteBottom = wb
+                    val nb = Board().apply { loadFromFen(old.fen) }
+                    Game.play(nb, hit)
+                    // this read's own (wrong) moves come off the list first
+                    if (before != null) repeat(added) { if (playedMoves.isNotEmpty()) playedMoves.removeAt(playedMoves.size - 1) }
+                    board = nb
+                    for (m in hit.path) playedMoves.add(m.toString())
+                    logVersion++
+                    lastPlies = hit.path.size
+                    clearMisses()
+                    truthRead = null
+                    return Step.MOVED
+                }
+            }
+        }
+        if (whiteBottom == null) whiteBottom = wb
+        val nb = Game.newBoard(read, whiteToMove)
+        board = nb
+        restartLog(nb)
+        clearMisses()
+        lastPlies = 0
+        truthRead = null
+        return Step.RESET
+    }
+
+    /**
+     * which side made the last move, from the site's highlight: chess sites tint the two squares of the last move.
+     * the board has two normal square colors; a square whose background is neither is highlighted. the piece on a
+     * highlighted square is the one that just moved. null when there is no clear highlight
+     */
+    fun lastMoverWhite(screen: IntArray, reads: Array<SquareRead>, wb: Boolean): Boolean? {
+        val lit = litSquares(reads)
+        if (lit.isEmpty() || lit.size > 3) return null // none, or not a clear two-square highlight
+        val movers = lit.map { screen[it] }.filter { it != BoardVision.EMPTY }.distinct()
+        if (movers.size != 1) return null
+        return movers[0] == BoardVision.WHITE
+    }
+
+    /** the screen squares (row 0 = top) whose background is tinted: neither of the board's two square colors */
+    fun litSquares(reads: Array<SquareRead>): List<Int> {
+        fun dist(a: Int, b: Int): Int {
+            val dr = ((a shr 16) and 255) - ((b shr 16) and 255)
+            val dg = ((a shr 8) and 255) - ((b shr 8) and 255)
+            val db = (a and 255) - (b and 255)
+            return kotlin.math.abs(dr) + kotlin.math.abs(dg) + kotlin.math.abs(db)
+        }
+        // the normal light and dark square colors: the most common background on each square color
+        fun usual(light: Boolean): Int? {
+            val bgs = (0 until 64).filter { ((it / 8 + it % 8) % 2 == 0) == light }.map { reads[it].bg }.filter { it != 0 }
+            if (bgs.isEmpty()) return null
+            return bgs.maxByOrNull { b -> bgs.count { dist(it, b) < 30 } }
+        }
+        val lightBg = usual(true) ?: return emptyList()
+        val darkBg = usual(false) ?: return emptyList()
+        return (0 until 64).filter { i ->
+            val bg = reads[i].bg
+            val normal = if ((i / 8 + i % 8) % 2 == 0) lightBg else darkBg
+            bg != 0 && dist(bg, normal) > 45
+        }
+    }
+
+    private fun follow(screen: IntArray, reads: Array<SquareRead>?, nowMs: Long): Step {
         // a new game: the start position on the screen, either way up. the way it faces says which side is yours
         // (the app shows your pieces at the bottom), so a game as black after a game as white just works
         val startWb = startOrientation(screen)
@@ -332,7 +482,7 @@ class Tracker(var iAmWhite: Boolean, private val myTurnAtStart: Boolean) {
                     }
                     retrying = true
                     try {
-                        val again = update(screen, reads, nowMs)
+                        val again = follow(screen, reads, nowMs)
                         if (again != Step.UNREADABLE && again != Step.RESYNC) return again
                     } finally {
                         retrying = false
