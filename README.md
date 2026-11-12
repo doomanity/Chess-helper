@@ -79,9 +79,18 @@ use it against computer bots only: chess.com and lichess ban accounts that let a
 
 ## reading the board
 
-the board reading is the one from version 1.12 (back in 1.24, after the newer reading made more mistakes on real games). it learns the piece shapes at a game's start position, follows the moves, and asks the AI (claude, needs an api key, "ask the AI when stuck") when it starts in the middle of a game or loses track. a new reading is being built and tested against real recordings before it comes back.
+the board reading is the 1.12 one with fixes found by replaying a real recorded game frame by frame (tools/replay):
+
+- board themes with specks (falling snow, stars, grain): tiny spots are ignored, so hint dots are seen as dots, not as pieces
+- squares with a soft gradient (frosted, glass themes): the background is the middle of the edge colors, so an empty square isn't read as a piece
+- castling while only the king has moved on screen (a castling premove, or the rook still sliding)
+- takebacks (a coach rewinding): the earlier position is found again
+
+it learns the piece shapes at a game's start position, follows the moves, and asks the AI (claude, needs an api key, "ask the AI when stuck") when it starts in the middle of a game or loses track.
 
 every suggestion is checked to be a legal move in the position on screen before it is drawn or saved, so an old game's arrows can never show up.
+
+to check the reading on a recording: extract frames (ffmpeg -i game.mp4 -vf fps=2 frames/f_%04d.png) and run tools/replay/Replay.kt with the app's vision and tracker files; it prints what the reader believes on every frame.
 
 ## look
 

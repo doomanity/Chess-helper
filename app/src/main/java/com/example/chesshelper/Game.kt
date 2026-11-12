@@ -289,9 +289,35 @@ object Game {
     /** one way to get from a position to what the screen shows: the moves, and how many squares still differ (0 or 1) */
     class Hit(val path: List<Move>, val mis: Int)
 
+    private const val EMPTY_OCC = 0
+
+    /** for a castling move just played on b: the rook's from and to squares (chess indexes), else null */
+    private fun castleRook(m: Move, b: Board): Pair<Int, Int>? {
+        val king = b.getPiece(m.to)
+        if (king.pieceType != PieceType.KING) return null
+        val df = m.to.file.ordinal - m.from.file.ordinal
+        if (Math.abs(df) != 2) return null
+        val rank = m.from.rank.ordinal
+        return if (df > 0) Pair(rank * 8 + 7, rank * 8 + 5) else Pair(rank * 8 + 0, rank * 8 + 3)
+    }
+
     private fun collect(b: Board, occ: IntArray, depth: Int, path: ArrayList<Move>, out: ArrayList<Hit>) {
         if (depth == 0) {
-            val m = mismatch(occOf(b), occ)
+            val cur = occOf(b)
+            var m = mismatch(cur, occ)
+            // a castle shown with only the king moved yet (a castling premove, or the rook still sliding over):
+            // the rook's two squares may still show the old picture
+            if (m in 1..2) {
+                val last = path.lastOrNull()
+                val castle = last?.let { castleRook(it, b) }
+                if (castle != null) {
+                    val (rFrom, rTo) = castle
+                    var rest = 0
+                    for (i in 0 until 64) if (cur[i] != occ[i] && i != rFrom && i != rTo) rest++
+                    val rookStill = occ[rFrom] == cur[last.to.ordinal] && occ[rTo] == EMPTY_OCC
+                    if (rest == 0 && rookStill) m = 0
+                }
+            }
             if (m <= 1) out.add(Hit(ArrayList(path), m))
             return
         }

@@ -220,6 +220,19 @@ object BoardVision {
 
     private const val N = 24
     private const val MASK_WORDS = (N * N + 63) / 64
+    private const val DIFF = 36        // how far from the background a pixel must be to belong to something
+    private const val SPECK_CELLS = 8  // smaller connected spots are specks (snow, stars), not part of a piece
+
+    /** per channel median of the ring colors within 40 of c */
+    private fun medianNear(ring: List<Int>, c: Int): Int {
+        val near = ring.filter { dist(it, c) <= 40 }
+        if (near.size < 3) return c
+        val rs = near.map { red(it) }.sorted()
+        val gs = near.map { green(it) }.sorted()
+        val bs = near.map { blue(it) }.sorted()
+        val m = near.size / 2
+        return rgb(rs[m], gs[m], bs[m])
+    }
 
     private class Scan(val diff: Int, val minX: Int, val maxX: Int, val minY: Int, val maxY: Int, val flags: BooleanArray, val luma: IntArray)
 
@@ -238,14 +251,50 @@ object BoardVision {
                 val fy = 0.18f + 0.64f * (iy + 0.5f) / N
                 val p = px[(y0 + fy * s).toInt() * w + (x0 + fx * s).toInt()]
                 lum[iy * N + ix] = luma(p)
-                if (dist(p, bg) > 30) {
-                    flags[iy * N + ix] = true
-                    cols[diff++] = p
-                    if (ix < minX) minX = ix
-                    if (ix > maxX) maxX = ix
-                    if (iy < minY) minY = iy
-                    if (iy > maxY) maxY = iy
+                if (dist(p, bg) > DIFF) flags[iy * N + ix] = true
+            }
+        }
+        // specks are not part of anything: board themes with falling snow, stars or grain scatter tiny spots over
+        // every square. keep only the real shapes (a piece, a hint dot): connected spots of a fair size
+        val comp = IntArray(N * N) { -1 }
+        val sizes = ArrayList<Int>()
+        val stack = IntArray(N * N)
+        for (k in 0 until N * N) {
+            if (!flags[k] || comp[k] >= 0) continue
+            val id = sizes.size
+            var n = 0
+            var top = 0
+            stack[top++] = k
+            comp[k] = id
+            while (top > 0) {
+                val q = stack[--top]
+                n++
+                val qx = q % N
+                val qy = q / N
+                if (qx > 0 && flags[q - 1] && comp[q - 1] < 0) { comp[q - 1] = id; stack[top++] = q - 1 }
+                if (qx < N - 1 && flags[q + 1] && comp[q + 1] < 0) { comp[q + 1] = id; stack[top++] = q + 1 }
+                if (qy > 0 && flags[q - N] && comp[q - N] < 0) { comp[q - N] = id; stack[top++] = q - N }
+                if (qy < N - 1 && flags[q + N] && comp[q + N] < 0) { comp[q + N] = id; stack[top++] = q + N }
+            }
+            sizes.add(n)
+        }
+        val biggest = sizes.maxOrNull() ?: 0
+        val keepMin = maxOf(SPECK_CELLS, (biggest * 0.15f).toInt())
+        for (iy in 0 until N) {
+            for (ix in 0 until N) {
+                val k = iy * N + ix
+                if (!flags[k]) continue
+                if (sizes[comp[k]] < keepMin) {
+                    flags[k] = false
+                    continue
                 }
+                val fx = 0.18f + 0.64f * (ix + 0.5f) / N
+                val fy = 0.18f + 0.64f * (iy + 0.5f) / N
+                cols[diff++] = px[(y0 + fy * s).toInt() * w + (x0 + fx * s).toInt()]
+                if (ix < minX) minX = ix
+                if (ix > maxX) maxX = ix
+                if (iy < minY) minY = iy
+                if (iy > maxY) maxY = iy
             }
         }
         return Scan(diff, minX, maxX, minY, maxY, flags, lum)
@@ -290,6 +339,9 @@ object BoardVision {
                     bg = ring[i]
                 }
             }
+            // squares with a soft gradient (frosted, glass themes): the middle of the ring colors near the most
+            // common one, not one edge's shade
+            bg = medianNear(ring, bg)
             var sc = scan(px, w, x0, y0, s, bg, colsA)
             var cols = colsA
             if (sc.diff > 0.8f * N * N) {
@@ -362,14 +414,20 @@ object BoardVision {
                 else 70 + 175 * bright / (bright + darkPx)
                 // shape of the piece: which spots of the square differ from the background
                 mask = LongArray(MASK_WORDS)
+                val on = BooleanArray(N * N)
                 for (iy in 0 until N) for (ix in 0 until N) {
                     val fx = 0.08f + 0.84f * (ix + 0.5f) / N
                     val fy = 0.08f + 0.84f * (iy + 0.5f) / N
                     val p = px[(y0 + fy * s).toInt() * w + (x0 + fx * s).toInt()]
-                    if (dist(p, bg) > 30) {
-                        val bit = iy * N + ix
-                        mask[bit shr 6] = mask[bit shr 6] or (1L shl (bit and 63))
-                    }
+                    if (dist(p, bg) > DIFF) on[iy * N + ix] = true
+                }
+                // the shape without specks (snow): a spot counts only with a neighbour that is on too
+                for (iy in 0 until N) for (ix in 0 until N) {
+                    val k = iy * N + ix
+                    if (!on[k]) continue
+                    val nb = (ix > 0 && on[k - 1]) || (ix < N - 1 && on[k + 1]) || (iy > 0 && on[k - N]) || (iy < N - 1 && on[k + N])
+                    if (!nb) continue
+                    mask[k shr 6] = mask[k shr 6] or (1L shl (k and 63))
                 }
             }
             out[r * 8 + c] = SquareRead(occupied, tone, fill, mask, dot, bg)

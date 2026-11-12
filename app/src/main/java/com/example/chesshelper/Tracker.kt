@@ -103,6 +103,7 @@ class Tracker(var iAmWhite: Boolean, private val myTurnAtStart: Boolean) {
     companion object {
         const val START_PLACEMENT = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR"
         const val MAX_PLY = 3
+        const val REWIND_PLIES = 40  // how far back a takeback can go and still be followed
         const val HOLD_MS = 9000L   // the longest we wait out a premove picture or a lifted piece
         const val LOST_MS = 2500L   // how long a position we can't explain has to stay on screen before we start over
         const val SUSPECT = 3       // this many piece types that look wrong means our board is probably wrong
@@ -343,6 +344,9 @@ class Tracker(var iAmWhite: Boolean, private val myTurnAtStart: Boolean) {
                 }
             }
         }
+        // moves taken back (a coach's "rewinding", a takeback): the screen shows a position from earlier in this
+        // game, or one or two moves after it. go back there instead of reading the board again
+        rewind(occ, seenChess)?.let { return it }
         val ms = missScreen
         if (ms == null || Game.mismatch(ms, screen) > 0) {
             missScreen = screen.copyOf()
@@ -356,6 +360,47 @@ class Tracker(var iAmWhite: Boolean, private val myTurnAtStart: Boolean) {
             return Step.RESYNC
         }
         return Step.UNREADABLE
+    }
+
+    /**
+     * the newest earlier position of this game (up to REWIND_PLIES back) that the screen shows exactly, or that one
+     * or two moves after it lead to. the record is cut back to it. null when none fits
+     */
+    private fun rewind(occ: IntArray, seenChess: IntArray?): Step? {
+        if (startFen.isEmpty() || playedMoves.isEmpty()) return null
+        val start = Board()
+        try { start.loadFromFen(startFen) } catch (e: Exception) { return null }
+        val boards = ArrayList<String>()
+        boards.add(start.fen)
+        try {
+            for (m in playedMoves) {
+                start.doMove(com.github.bhlangonijr.chesslib.move.Move(m.replace("?", ""), start.sideToMove))
+                boards.add(start.fen)
+            }
+        } catch (e: Exception) {
+            return null
+        }
+        // boards[k] = the position after k moves. the last one is where we are now (already checked)
+        val lowest = maxOf(0, boards.size - 1 - REWIND_PLIES)
+        for (k in boards.size - 2 downTo lowest) {
+            val b = Board()
+            b.loadFromFen(boards[k])
+            val hit = (0..2).asSequence().flatMap { d ->
+                Game.hitsAt(b, occ, d).filter { it.mis == 0 }.asSequence()
+            }.firstOrNull() ?: continue
+            Game.play(b, hit)
+            if (seenChess != null && Game.typeMismatch(b, seenChess) > 2) continue
+            while (playedMoves.size > k) playedMoves.removeAt(playedMoves.size - 1)
+            promo.keys.removeAll { true }
+            for (m in hit.path) playedMoves.add(m.toString())
+            logVersion++
+            board = b
+            clearMisses()
+            lastPlies = hit.path.size
+            turnSure = false
+            return Step.MOVED
+        }
+        return null
     }
 
     /**
