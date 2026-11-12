@@ -8,6 +8,7 @@ import android.os.Build
 /** the accent color: taken from the wallpaper (made brighter so it glows), or a fixed neon color */
 object Theme {
     val PRESETS = linkedMapOf(
+        "brass" to Color.rgb(222, 184, 98),
         "wallpaper" to 0,
         "cyan" to Color.rgb(0, 229, 255),
         "violet" to Color.rgb(179, 136, 255),

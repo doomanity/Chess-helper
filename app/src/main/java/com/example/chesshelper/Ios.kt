@@ -26,36 +26,45 @@ import android.widget.ScrollView
 import android.widget.TextView
 
 /**
- * a small ios look for the app's screens: grouped lists with rounded sections, switches, segmented controls,
- * sliders and big filled buttons, in apple's system colors. follows the phone's light / dark mode
- * (or always dark when forceDark, for panels drawn over other apps).
+ * the app's look, "clubroom": a chess club at night. tournament felt green, ivory text like the light pieces,
+ * brass for what you can press (like the fittings on an old chess clock). grouped lists with rounded sections,
+ * switches, segmented controls, sliders and big buttons. one look in light and dark mode alike.
+ * titles are set in fraunces (a soft serif), everything else in the phone's sans.
  */
-class Ios(private val ctx: Context, forceDark: Boolean = false) {
-    val dark: Boolean = forceDark ||
-        (ctx.resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK) == Configuration.UI_MODE_NIGHT_YES
+class Ios(private val ctx: Context, @Suppress("UNUSED_PARAMETER") forceDark: Boolean = false) {
+    /** always a dark look (some screens pick alphas by this) */
+    val dark: Boolean = true
     private val d = ctx.resources.displayMetrics.density
 
-    // apple's system colors (light / dark)
-    val bg = if (dark) 0xFF000000.toInt() else 0xFFF2F2F7.toInt()          // grouped background
-    val cell = if (dark) 0xFF1C1C1E.toInt() else 0xFFFFFFFF.toInt()        // a section
-    val cell2 = if (dark) 0xFF2C2C2E.toInt() else 0xFFF2F2F7.toInt()       // something inside a section
-    val pressed = if (dark) 0xFF3A3A3C.toInt() else 0xFFD1D1D6.toInt()
-    val label = if (dark) 0xFFFFFFFF.toInt() else 0xFF000000.toInt()
-    val label2 = if (dark) 0x99EBEBF5.toInt() else 0x993C3C43.toInt()      // secondary text
-    val label3 = if (dark) 0x4DEBEBF5.toInt() else 0x4D3C3C43.toInt()      // placeholder, faint text
-    val separator = if (dark) 0xFF38383A.toInt() else 0xFFC6C6C8.toInt()
-    val fill = if (dark) 0x3D767680 else 0x1F767680                         // segmented control track, text field
-    val segOn = if (dark) 0xFF636366.toInt() else 0xFFFFFFFF.toInt()
-    val blue = if (dark) 0xFF0A84FF.toInt() else 0xFF007AFF.toInt()
-    val green = if (dark) 0xFF30D158.toInt() else 0xFF34C759.toInt()
-    val red = if (dark) 0xFFFF453A.toInt() else 0xFFFF3B30.toInt()
-    val orange = if (dark) 0xFFFF9F0A.toInt() else 0xFFFF9500.toInt()
-    val indigo = if (dark) 0xFF5E5CE6.toInt() else 0xFF5856D6.toInt()
-    val gray = 0xFF8E8E93.toInt()
+    // the clubroom palette
+    val felt = 0xFF0F2E25.toInt()                     // the table: screen background
+    val bg = felt
+    val cell = 0xFF173F33.toInt()                     // a section, raised felt
+    val cell2 = 0xFF1F4D3F.toInt()                    // something inside a section
+    val pressed = 0xFF275C4B.toInt()
+    val ivory = 0xFFF0E8D5.toInt()                    // text, the light pieces
+    val label = ivory
+    val label2 = 0xADF0E8D5.toInt()                   // secondary text
+    val label3 = 0x5CF0E8D5                           // placeholder, faint text
+    val separator = 0xFF2A5646.toInt()
+    val fill = 0xFF0B241D.toInt()                     // segmented control track, text field: sunk into the felt
+    val brass = 0xFFD2AD5B.toInt()                    // what you can press
+    val brassDeep = 0xFF9C7A33.toInt()
+    val ink = 0xFF16261F.toInt()                      // text on brass or ivory, the dark pieces
+    val segOn = brass
+    val blue = brass                                  // the old accent name: now brass everywhere
+    val green = 0xFF86C796.toInt()                    // sage: good
+    val red = 0xFFE2694F.toInt()                      // brick: stop, danger
+    val orange = 0xFFE8A23A.toInt()                   // amber
+    val indigo = 0xFFA592DE.toInt()
+    val gray = 0xFF8FA398.toInt()
 
     val regular: Typeface = Typeface.create("sans-serif", Typeface.NORMAL)
     val medium: Typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
     val bold: Typeface = Typeface.create("sans-serif", Typeface.BOLD)
+    /** the serif for titles and section headers */
+    val serif: Typeface = serifOf(ctx, 600)
+    val serifSoft: Typeface = serifOf(ctx, 500)
 
     fun dp(v: Float) = (v * d).toInt()
     fun px(v: Float) = v * d
@@ -97,13 +106,12 @@ class Ios(private val ctx: Context, forceDark: Boolean = false) {
     fun screen(a: Activity, title: String, subtitle: String? = null): Pair<ScrollView, LinearLayout> {
         a.window.statusBarColor = bg
         a.window.navigationBarColor = bg
-        if (!dark) lightBars(a)
         val col = LinearLayout(ctx)
         col.orientation = LinearLayout.VERTICAL
-        col.setPadding(dp(16f), dp(18f), dp(16f), dp(36f))
-        val t = text(title, 34f, label, bold)
-        t.letterSpacing = -0.01f
-        t.setPadding(dp(4f), dp(20f), 0, dp(2f))
+        col.setPadding(dp(18f), dp(18f), dp(18f), dp(40f))
+        val t = text(title, 34f, label, serif)
+        t.letterSpacing = -0.015f
+        t.setPadding(dp(2f), dp(22f), 0, dp(2f))
         col.addView(t)
         if (subtitle != null) {
             val s = text(subtitle, 15f, label2)
@@ -111,16 +119,16 @@ class Ios(private val ctx: Context, forceDark: Boolean = false) {
             col.addView(s)
         }
         val scroll = ScrollView(ctx)
-        scroll.setBackgroundColor(bg)
+        scroll.background = feltBackground()
         scroll.isVerticalScrollBarEnabled = false
         scroll.addView(col)
         return Pair(scroll, col)
     }
 
-    @Suppress("DEPRECATION")
-    private fun lightBars(a: Activity) {
-        a.window.decorView.systemUiVisibility = View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR or View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR
-    }
+    /** the table: felt that is a touch lighter where the lamp is (top) */
+    fun feltBackground(): Drawable = GradientDrawable(
+        GradientDrawable.Orientation.TOP_BOTTOM, intArrayOf(0xFF143A2E.toInt(), felt, 0xFF0B251D.toInt())
+    )
 
     // ------------------------------------------------------------------ grouped sections
 
@@ -133,7 +141,8 @@ class Ios(private val ctx: Context, forceDark: Boolean = false) {
                 val line = View(ctx)
                 line.setBackgroundColor(separator)
                 val lp = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, maxOf(1, dp(0.5f)))
-                lp.leftMargin = dp(16f)
+                lp.leftMargin = dp(18f)
+                lp.rightMargin = dp(18f)
                 box.addView(line, lp)
             }
             box.addView(v, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
@@ -145,21 +154,21 @@ class Ios(private val ctx: Context, forceDark: Boolean = false) {
     /** a section with a small grey header above and an optional explanation below */
     fun group(parent: LinearLayout, header: String?, footer: String? = null): Group {
         if (header != null) {
-            val h = text(header.uppercase(), 13f, label2)
-            h.letterSpacing = 0.02f
-            h.setPadding(dp(16f), dp(26f), dp(16f), dp(7f))
+            // section names in the serif, sentence case, ivory: like a chapter in a chess book
+            val h = text(header.replaceFirstChar { it.uppercase() }, 19f, label, serifSoft)
+            h.setPadding(dp(4f), dp(30f), dp(16f), dp(9f))
             parent.addView(h)
         } else {
             parent.addView(View(ctx), LinearLayout.LayoutParams(1, dp(22f)))
         }
         val box = LinearLayout(ctx)
         box.orientation = LinearLayout.VERTICAL
-        box.background = round(cell, 12f)
+        box.background = round(cell, 16f, 0x1FF0E8D5)
         box.clipToOutline = true
         parent.addView(box, full())
         if (footer != null) {
             val f = text(footer, 13f, label2)
-            f.setPadding(dp(16f), dp(7f), dp(16f), 0)
+            f.setPadding(dp(4f), dp(8f), dp(12f), 0)
             parent.addView(f)
         }
         return Group(box)
@@ -168,14 +177,14 @@ class Ios(private val ctx: Context, forceDark: Boolean = false) {
     private fun rowBox(minH: Float = 46f): LinearLayout = LinearLayout(ctx).apply {
         orientation = LinearLayout.HORIZONTAL
         gravity = Gravity.CENTER_VERTICAL
-        minimumHeight = dp(minH)
-        setPadding(dp(16f), dp(10f), dp(16f), dp(10f))
+        minimumHeight = dp(minH + 6f)
+        setPadding(dp(18f), dp(12f), dp(16f), dp(12f))
     }
 
     private fun titleBlock(title: String, subtitle: String?): LinearLayout {
         val col = LinearLayout(ctx)
         col.orientation = LinearLayout.VERTICAL
-        col.addView(text(title, 17f, label))
+        col.addView(text(title, 16.5f, label))
         if (subtitle != null) {
             val s = text(subtitle, 13f, label2)
             s.setPadding(0, dp(3f), 0, 0)
@@ -201,7 +210,7 @@ class Ios(private val ctx: Context, forceDark: Boolean = false) {
         val row = rowBox()
         row.addView(text(title, 17f, tint), weight())
         if (value != null) row.addView(text(value, 17f, label2))
-        val chev = text("›", 22f, label3, medium)
+        val chev = text("›", 22f, brass, medium)
         chev.setPadding(dp(8f), 0, 0, dp(2f))
         row.addView(chev)
         row.background = pressable(ColorDrawable(Color.TRANSPARENT), ColorDrawable(pressed))
@@ -223,9 +232,9 @@ class Ios(private val ctx: Context, forceDark: Boolean = false) {
     fun segRow(title: String?, options: List<Pair<String, String>>, current: String, onPick: (String) -> Unit): View {
         val col = LinearLayout(ctx)
         col.orientation = LinearLayout.VERTICAL
-        col.setPadding(dp(16f), dp(12f), dp(16f), dp(12f))
+        col.setPadding(dp(18f), dp(14f), dp(18f), dp(14f))
         if (title != null) {
-            val t = text(title, 15f, label)
+            val t = text(title, 15f, label2)
             t.setPadding(0, 0, 0, dp(9f))
             col.addView(t)
         }
@@ -238,15 +247,15 @@ class Ios(private val ctx: Context, forceDark: Boolean = false) {
         val row = LinearLayout(ctx)
         row.orientation = LinearLayout.HORIZONTAL
         row.setPadding(dp(2f), dp(2f), dp(2f), dp(2f))
-        row.background = round(fill, 9f)
+        row.background = round(fill, 11f)
         val views = ArrayList<TextView>()
         fun paint(sel: String) {
             for ((i, v) in views.withIndex()) {
                 val on = options[i].first == sel
-                v.background = if (on) round(segOn, 7f) else null
+                v.background = if (on) round(segOn, 9f) else null
                 v.elevation = if (on) px(1.5f) else 0f
                 v.typeface = if (on) medium else regular
-                v.setTextColor(label)
+                v.setTextColor(if (on) ink else label2)
             }
         }
         for ((value, t) in options) {
@@ -269,11 +278,11 @@ class Ios(private val ctx: Context, forceDark: Boolean = false) {
     fun sliderRow(title: String, min: Int, max: Int, step: Int, value: Int, show: (Int) -> String, onSet: (Int) -> Unit): View {
         val col = LinearLayout(ctx)
         col.orientation = LinearLayout.VERTICAL
-        col.setPadding(dp(16f), dp(12f), dp(16f), dp(6f))
+        col.setPadding(dp(18f), dp(14f), dp(18f), dp(6f))
         val top = LinearLayout(ctx)
         top.orientation = LinearLayout.HORIZONTAL
-        top.addView(text(title, 17f, label), weight())
-        val v = text(show(value), 17f, label2)
+        top.addView(text(title, 16.5f, label), weight())
+        val v = text(show(value), 15f, brass, medium)
         top.addView(v)
         col.addView(top)
         val s = IosSlider(ctx, this, min, max, step, value.coerceIn(min, max), { v.text = show(it) }, onSet)
@@ -285,10 +294,10 @@ class Ios(private val ctx: Context, forceDark: Boolean = false) {
     fun fieldRow(title: String?, value: String, hint: String, secret: Boolean = false): Pair<View, EditText> {
         val col = LinearLayout(ctx)
         col.orientation = LinearLayout.VERTICAL
-        col.setPadding(dp(16f), dp(11f), dp(16f), dp(11f))
+        col.setPadding(dp(18f), dp(12f), dp(18f), dp(12f))
         if (title != null) {
             val t = text(title, 13f, label2)
-            t.setPadding(0, 0, 0, dp(5f))
+            t.setPadding(0, 0, 0, dp(6f))
             col.addView(t)
         }
         val e = EditText(ctx)
@@ -298,8 +307,8 @@ class Ios(private val ctx: Context, forceDark: Boolean = false) {
         e.typeface = regular
         e.setTextColor(label)
         e.setHintTextColor(label3)
-        e.background = null
-        e.setPadding(0, dp(2f), 0, dp(2f))
+        e.background = round(fill, 10f)
+        e.setPadding(dp(12f), dp(9f), dp(12f), dp(9f))
         e.setSingleLine(true)
         e.inputType = if (secret) InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD else InputType.TYPE_CLASS_TEXT
         col.addView(e, full())
@@ -309,18 +318,22 @@ class Ios(private val ctx: Context, forceDark: Boolean = false) {
     /** a plain text row (a note inside a section) */
     fun noteRow(t: String, color: Int = label2, size: Float = 15f): TextView {
         val v = text(t, size, color)
-        v.setPadding(dp(16f), dp(12f), dp(16f), dp(12f))
+        v.setPadding(dp(18f), dp(13f), dp(18f), dp(13f))
         return v
     }
 
     /** the big rounded filled button at the bottom of an ios screen */
     fun bigButton(t: String, color: Int = blue, filled: Boolean = true, onClick: () -> Unit): View {
-        val v = text(t, 17f, if (filled) Color.WHITE else color, medium)
+        // filled brass (or another color) with dark ink text, like a brass plate
+        val light = Color.luminance(color) > 0.35f
+        val v = text(t, 17f, if (filled) (if (light) ink else ivory) else color, medium)
         v.gravity = Gravity.CENTER
-        v.minHeight = dp(50f)
-        v.setPadding(dp(16f), dp(14f), dp(16f), dp(14f))
-        val normal = round(if (filled) color else Theme.withAlpha(color, if (dark) 46 else 30), 14f)
-        val down = round(if (filled) Theme.withAlpha(color, 190) else Theme.withAlpha(color, if (dark) 80 else 55), 14f)
+        v.minHeight = dp(54f)
+        v.setPadding(dp(16f), dp(15f), dp(16f), dp(15f))
+        val normal = if (filled) GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM,
+            intArrayOf(lighter(color, 0.12f), color)).apply { cornerRadius = px(16f) }
+            else round(Theme.withAlpha(color, 40), 16f, Theme.withAlpha(color, 90))
+        val down = round(if (filled) darker(color, 0.15f) else Theme.withAlpha(color, 80), 16f)
         v.background = pressable(normal, down)
         v.setOnClickListener {
             it.animate().scaleX(0.97f).scaleY(0.97f).setDuration(70).withEndAction {
@@ -335,8 +348,32 @@ class Ios(private val ctx: Context, forceDark: Boolean = false) {
     fun pill(t: String, color: Int): TextView {
         val v = text(t, 12f, color, medium)
         v.setPadding(dp(8f), dp(3f), dp(8f), dp(3f))
-        v.background = round(Theme.withAlpha(color, if (dark) 50 else 32), 100f)
+        v.background = round(Theme.withAlpha(color, 50), 100f)
         return v
+    }
+
+    fun lighter(c: Int, t: Float) = Color.rgb(
+        (Color.red(c) + (255 - Color.red(c)) * t).toInt(), (Color.green(c) + (255 - Color.green(c)) * t).toInt(),
+        (Color.blue(c) + (255 - Color.blue(c)) * t).toInt()
+    )
+
+    fun darker(c: Int, t: Float) = Color.rgb(
+        (Color.red(c) * (1 - t)).toInt(), (Color.green(c) * (1 - t)).toInt(), (Color.blue(c) * (1 - t)).toInt()
+    )
+
+    companion object {
+        private val cache = HashMap<Int, Typeface>()
+
+        /** fraunces at a weight (bundled in assets, a variable font), or the phone's serif if it can't load */
+        fun serifOf(ctx: Context, weight: Int): Typeface = cache.getOrPut(weight) {
+            try {
+                Typeface.Builder(ctx.assets, "fonts/fraunces.ttf")
+                    .setFontVariationSettings("'wght' $weight, 'opsz' 72, 'SOFT' 60")
+                    .build() ?: Typeface.SERIF
+            } catch (e: Exception) {
+                Typeface.create(Typeface.SERIF, Typeface.BOLD)
+            }
+        }
     }
 }
 
@@ -369,14 +406,14 @@ class IosSwitch(ctx: Context, private val ui: Ios, on: Boolean, private val onCh
         val w = width.toFloat()
         val h = height.toFloat()
         r.set(0f, 0f, w, h)
-        val off = if (ui.dark) 0xFF39393D.toInt() else 0xFFE9E9EA.toInt()
-        p.color = blend(off, ui.green, pos)
+        val off = ui.fill
+        p.color = blend(off, ui.brass, pos)
         c.drawRoundRect(r, h / 2, h / 2, p)
         val m = ui.px(2f)
         val kr = h / 2 - m
         val cx = m + kr + (w - 2 * m - 2 * kr) * pos
-        p.color = Color.WHITE
-        p.setShadowLayer(ui.px(3f), 0f, ui.px(1.5f), 0x40000000)
+        p.color = ui.ivory
+        p.setShadowLayer(ui.px(3f), 0f, ui.px(1.5f), 0x55000000)
         c.drawCircle(cx, h / 2, kr, p)
         p.clearShadowLayer()
     }
@@ -405,23 +442,19 @@ class IosSlider(
         val right = width - knob
         val x = left + (right - left) * frac()
         val th = ui.px(2f)
-        p.color = if (ui.dark) 0xFF3A3A3C.toInt() else 0xFFE5E5EA.toInt()
+        p.color = ui.fill
         r.set(left, y - th, right, y + th)
         c.drawRoundRect(r, th, th, p)
-        p.color = ui.blue
+        p.color = ui.brass
         r.set(left, y - th, x, y + th)
         c.drawRoundRect(r, th, th, p)
-        p.color = Color.WHITE
-        p.setShadowLayer(ui.px(4f), 0f, ui.px(2f), 0x33000000)
+        p.color = ui.ivory
+        p.setShadowLayer(ui.px(4f), 0f, ui.px(2f), 0x55000000)
         c.drawCircle(x, y, knob, p)
         p.clearShadowLayer()
-        if (!ui.dark) {
-            p.style = Paint.Style.STROKE
-            p.strokeWidth = ui.px(0.5f)
-            p.color = 0x14000000
-            c.drawCircle(x, y, knob, p)
-            p.style = Paint.Style.FILL
-        }
+        // a brass center, like a clock button
+        p.color = ui.brass
+        c.drawCircle(x, y, knob * 0.32f, p)
     }
 
     override fun onTouchEvent(e: MotionEvent): Boolean {

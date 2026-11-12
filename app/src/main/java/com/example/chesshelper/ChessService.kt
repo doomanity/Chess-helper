@@ -164,6 +164,7 @@ class ChessService : Service(), SideBarHost, SharedPreferences.OnSharedPreferenc
 
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        running = true
         if (intent?.action == "STOP") {
             stopSelf()
             return START_NOT_STICKY
@@ -1769,6 +1770,8 @@ class ChessService : Service(), SideBarHost, SharedPreferences.OnSharedPreferenc
     }
 
     companion object {
+        /** true while the helper runs (the main screen shows it) */
+        @Volatile @JvmStatic var running = false
         const val GUESSES = 3 // how many of the bot's likely moves to show while it thinks
         const val PREMOVE_ILLUSION_MS = 250 // illusion's think for one premove
         const val READY_MAX = 600            // answers kept in the phone's memory while the helper runs
@@ -1783,6 +1786,7 @@ class ChessService : Service(), SideBarHost, SharedPreferences.OnSharedPreferenc
     }
 
     override fun onDestroy() {
+        running = false
         running = false
         worker?.interrupt()
         try { Cfg.prefs(this).unregisterOnSharedPreferenceChangeListener(this) } catch (_: Exception) {}

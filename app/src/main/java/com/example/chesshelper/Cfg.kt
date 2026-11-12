@@ -53,7 +53,7 @@ class Cfg(p: SharedPreferences) {
     val arrowSize = p.getInt("arrow_size", 100) / 100f          // 0.6 .. 1.6
     val cardSize = p.getInt("card_size", 100) / 100f            // 0.7 .. 1.4
     val opacity = p.getInt("opacity", 95) / 100f                // 0.3 .. 1
-    val theme = p.getString("theme", "wallpaper") ?: "wallpaper"
+    val theme = p.getString("theme", "brass") ?: "brass"
 
     // the side bar
     val sidebar = p.getBoolean("sidebar", true)
@@ -73,6 +73,10 @@ class Cfg(p: SharedPreferences) {
             // version 1.2 picks your side by itself: switch everybody to auto once (they can pick a side again)
             if (!p.getBoolean("color_auto_v12", false)) {
                 p.edit().putString("color", "auto").putBoolean("color_auto_v12", true).apply()
+            }
+            // version 1.17 has the clubroom look: brass on the board too, once (other colors stay a choice)
+            if (!p.getBoolean("theme_brass_v117", false)) {
+                p.edit().putString("theme", "brass").putBoolean("theme_brass_v117", true).apply()
             }
             return p
         }

@@ -90,7 +90,7 @@ use it against computer bots only: chess.com and lichess ban accounts that let a
 
 ## look
 
-the app screens follow the ios look (grouped lists, switches, segmented controls, sliders) and switch with your phone's light / dark mode. the quick menu looks like control center. the version is shown at the bottom of the main screen.
+the app has its own look, "clubroom": tournament felt green, ivory text and brass controls, titles in fraunces (a soft serif, bundled in assets/fonts, open font license). the main screen opens with a small board in a brass frame showing your last game, what the helper is doing and a big start plate. the card on the board matches (dark felt, brass edge, serif title) and the arrows' accent defaults to brass (other colors are still in look > color). the version is shown at the bottom of the main screen.
 
 ## side bar (quick menu while playing)
 

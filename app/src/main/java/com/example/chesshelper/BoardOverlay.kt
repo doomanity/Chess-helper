@@ -127,6 +127,8 @@ class BoardOverlay(ctx: Context) : View(ctx) {
     companion object {
         val PREDICT = Color.rgb(200, 206, 222) // the bot's guessed move: soft grey-white
         val BRILLIANT_BLUE = Color.rgb(30, 167, 255) // a brilliant move's arrow and "!!" badge
+        val IVORY = Color.rgb(240, 232, 213)           // card text (the clubroom look)
+        val DIM = Color.argb(176, 240, 232, 213)       // card secondary text
         const val ALERT_SECONDS = 2.2f
 
         /** guess 1, 2, 3 and the premove that answers it share a color (and a number) */
@@ -166,6 +168,7 @@ class BoardOverlay(ctx: Context) : View(ctx) {
 
     private val regular: Typeface = Typeface.create("sans-serif", Typeface.NORMAL)
     private val medium: Typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
+    private val serif: Typeface = Ios.serifOf(ctx, 600)
 
     private fun gradeColor(m: DrawMove): Int = if (m.brilliant) BRILLIANT_BLUE else if (m.star) Theme.GOLD else gradeColor(m.grade)
 
@@ -775,18 +778,18 @@ class BoardOverlay(ctx: Context) : View(ctx) {
         val rect = RectF(left, top + slide, left + w, top + h + slide)
         val radius = 20f * d * k
 
-        // an ios style dark card: soft shadow, near black glass, a hairline edge (and a faint glow for neon)
+        // the clubroom card: dark felt glass, a brass hairline edge (and a faint glow for neon)
         if (neon) {
             stroke.color = Theme.withAlpha(look.accent, (34 * glow).toInt())
             stroke.strokeWidth = 6f * d
             c.drawRoundRect(rect, radius, radius, stroke)
         }
-        card.color = Color.argb((236 * drawP).toInt(), 28, 28, 30)
+        card.color = Color.argb((238 * drawP).toInt(), 15, 46, 37)
         card.setShadowLayer(14f * d, 0f, 4f * d, Color.argb((90 * drawP).toInt(), 0, 0, 0))
         c.drawRoundRect(rect, radius, radius, card)
         card.clearShadowLayer()
-        stroke.color = Color.argb((40 * drawP).toInt(), 255, 255, 255)
-        stroke.strokeWidth = 0.8f * d
+        stroke.color = Color.argb((120 * drawP).toInt(), 210, 173, 91)
+        stroke.strokeWidth = 1f * d
         c.drawRoundRect(rect, radius, radius, stroke)
         if (m.alert != null) {
             // a critical moment: the edge pulses a few times, then stays lit
@@ -806,22 +809,28 @@ class BoardOverlay(ctx: Context) : View(ctx) {
             text.textSize = 12.5f * d * k
             text.textAlign = Paint.Align.LEFT
             text.typeface = medium
-            text.color = Color.argb(153, 235, 235, 245)
+            text.color = DIM
             if (m.alert != null) {
                 text.color = m.alertColor
                 text.isFakeBoldText = true
                 c.drawText(m.alert, rect.left + pad + 4f * d, y0 + head * 0.62f, text)
                 text.isFakeBoldText = false
-                text.color = Color.argb(153, 235, 235, 245)
+                text.color = DIM
             } else {
+                text.typeface = serif
+                text.textSize = 14f * d * k
+                text.color = IVORY
                 c.drawText(m.title, rect.left + pad + 4f * d, y0 + head * 0.62f, text)
+                text.typeface = medium
+                text.textSize = 12.5f * d * k
+                text.color = DIM
             }
             m.accuracy?.let {
                 text.textAlign = Paint.Align.RIGHT
                 c.drawText(it, rect.right - pad - 4f * d, y0 + head * 0.62f, text)
             }
             text.typeface = regular
-            text.color = Color.WHITE
+            text.color = IVORY
             y0 += head
         }
         // the bot's turn: one row per guess. "Nf6  52%" on the left, your answer to it on the right
@@ -848,13 +857,13 @@ class BoardOverlay(ctx: Context) : View(ctx) {
             text.textAlign = Paint.Align.LEFT
             text.textSize = rowH * 0.48f
             text.typeface = medium
-            text.color = Color.WHITE
+            text.color = IVORY
             c.drawText(gs.san, tx, cy + rowH * 0.17f, text)
             gs.prob?.let {
                 val sx = tx + text.measureText(gs.san) + rowH * 0.25f
                 text.typeface = regular
                 text.textSize = rowH * 0.4f
-                text.color = Color.argb(153, 235, 235, 245)
+                text.color = DIM
                 c.drawText("${Math.round(it * 100)}%", sx, cy + rowH * 0.15f, text)
             }
             // your premove for this guess, in the same color as its number
@@ -870,7 +879,7 @@ class BoardOverlay(ctx: Context) : View(ctx) {
                 c.drawText("→ $ans", rect.right - pad - 4f * d, cy + rowH * 0.17f, text)
             }
             text.typeface = regular
-            text.color = Color.WHITE
+            text.color = IVORY
         }
         for ((i, mv) in m.moves.sortedBy { it.rank }.withIndex()) {
             val cy = y0 + rowH * i + rowH / 2f
@@ -895,17 +904,17 @@ class BoardOverlay(ctx: Context) : View(ctx) {
             text.color = if (!mv.brilliant && (mv.grade == Grade.DECENT || mv.grade == Grade.OK || mv.star)) Color.BLACK else Color.WHITE
             c.drawText(if (mv.brilliant) "!!" else if (mv.star) "★" else mv.rank.toString(), dotX, cy + rowH * 0.14f, text)
             text.isFakeBoldText = false
-            text.color = Color.WHITE
+            text.color = IVORY
             text.textSize = rowH * 0.5f
             text.textAlign = Paint.Align.LEFT
             text.typeface = medium
             c.drawText(mv.label, rect.left + pad + rowH * 0.95f, cy + rowH * 0.18f, text)
             text.typeface = regular
             text.textAlign = Paint.Align.RIGHT
-            text.color = Color.argb(153, 235, 235, 245)
+            text.color = DIM
             val ex = rect.right - pad - (if (mv.grade == Grade.BLUNDER && !mv.star) rowH * 0.9f else 0f)
             c.drawText(mv.eval, ex, cy + rowH * 0.18f, text)
-            text.color = Color.WHITE
+            text.color = IVORY
             if (mv.grade == Grade.BLUNDER && !mv.star) skull(c, rect.right - pad - rowH * 0.34f, cy, rowH * 0.32f)
         }
     }

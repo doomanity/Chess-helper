@@ -180,7 +180,7 @@ class SideBar(private val ctx: Context, private val wm: WindowManager, private v
             val cy = height / 2f
             val half = width * 0.42f
             val rr = half * 0.62f
-            f.color = Theme.withAlpha(Color.rgb(28, 28, 30), (200 * vis).toInt())
+            f.color = Theme.withAlpha(Color.rgb(15, 46, 37), (215 * vis).toInt())
             f.setShadowLayer(6f * d, 0f, 2f * d, Theme.withAlpha(Color.BLACK, (90 * vis).toInt()))
             canvas.drawRoundRect(cx - half, cy - half, cx + half, cy + half, rr, rr, f)
             f.clearShadowLayer()
@@ -190,7 +190,7 @@ class SideBar(private val ctx: Context, private val wm: WindowManager, private v
             canvas.drawCircle(cx, cy, half * 0.55f, f)
             f.color = Theme.withAlpha(Color.WHITE, (245 * vis).toInt())
             canvas.drawCircle(cx, cy, half * 0.40f, f)
-            f.color = Theme.withAlpha(Color.rgb(28, 28, 30), (235 * vis).toInt())
+            f.color = Theme.withAlpha(Color.rgb(15, 46, 37), (235 * vis).toInt())
             f.textSize = half * 0.52f
             f.textAlign = Paint.Align.CENTER
             canvas.drawText(if (host.isPaused()) "\u275A\u275A" else "\u265E", cx, cy + half * 0.19f, f)
@@ -404,7 +404,7 @@ class SideBar(private val ctx: Context, private val wm: WindowManager, private v
         header.gravity = Gravity.CENTER_VERTICAL
         val titles = LinearLayout(ctx)
         titles.orientation = LinearLayout.VERTICAL
-        titles.addView(ui.text("chess helper", 22f, ui.label, ui.bold))
+        titles.addView(ui.text("Chess helper", 23f, ui.label, ui.serif))
         val status = ui.text(host.status(), 13f, ui.label2)
         status.setPadding(0, dp(3f), 0, 0)
         titles.addView(status)
@@ -531,7 +531,7 @@ class SideBar(private val ctx: Context, private val wm: WindowManager, private v
         v.setPadding(dp(12f), dp(12f), dp(12f), dp(12f))
         v.background = ui.pressable(ui.round(ui.cell, 20f), ui.round(ui.pressed, 20f))
         v.alpha = if (enabled) 1f else 0.4f
-        val i = ui.text(icon, 17f, Color.WHITE, ui.bold)
+        val i = ui.text(icon, 17f, ui.ink, ui.bold)
         i.gravity = Gravity.CENTER
         i.background = ui.round(col, 100f)
         v.addView(i, LinearLayout.LayoutParams(dp(38f), dp(38f)))

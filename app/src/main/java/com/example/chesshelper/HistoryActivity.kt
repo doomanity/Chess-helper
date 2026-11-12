@@ -36,7 +36,7 @@ class HistoryActivity : Activity() {
     private fun build() {
         ui = Ios(this)
         val games = GameHistory.all(this)
-        val (scroll, col) = ui.screen(this, "match history", if (games.isEmpty()) null else "${games.size} games")
+        val (scroll, col) = ui.screen(this, "Match history", if (games.isEmpty()) null else "${games.size} games")
 
         if (games.isEmpty()) {
             val g = ui.group(col, null)
@@ -89,14 +89,14 @@ class HistoryActivity : Activity() {
         box.gravity = Gravity.CENTER_VERTICAL
         box.setPadding(ui.dp(16f), ui.dp(16f), ui.dp(16f), ui.dp(16f))
         box.background = ui.round(ui.cell, 14f)
-        val icon = ui.text("!!", 22f, Color.WHITE, ui.bold)
+        val icon = ui.text("!!", 22f, ui.ink, ui.bold)
         icon.gravity = Gravity.CENTER
         icon.background = ui.round(teal, 100f)
         box.addView(icon, LinearLayout.LayoutParams(ui.dp(52f), ui.dp(52f)))
         val texts = LinearLayout(this)
         texts.orientation = LinearLayout.VERTICAL
         texts.setPadding(ui.dp(14f), 0, 0, 0)
-        texts.addView(ui.text("$total brilliant ${if (total == 1) "move" else "moves"}", 22f, teal, ui.bold))
+        texts.addView(ui.text("$total brilliant ${if (total == 1) "move" else "moves"}", 23f, teal, ui.serif))
         val sub = when {
             total == 0 -> "none yet. live labels count them while you play"
             else -> "in $inGames ${if (inGames == 1) "game" else "games"}"
@@ -113,7 +113,7 @@ class HistoryActivity : Activity() {
         row.gravity = Gravity.CENTER_VERTICAL
         row.setPadding(ui.dp(14f), ui.dp(10f), ui.dp(14f), ui.dp(10f))
         row.background = ui.pressable(ColorDrawable(Color.TRANSPARENT), ColorDrawable(ui.pressed))
-        val b = ui.text("!!", 13f, Color.WHITE, ui.bold)
+        val b = ui.text("!!", 13f, ui.ink, ui.bold)
         b.gravity = Gravity.CENTER
         b.background = ui.round(Label.BRILLIANT.color, 100f)
         row.addView(b, LinearLayout.LayoutParams(ui.dp(30f), ui.dp(30f)))
@@ -146,7 +146,7 @@ class HistoryActivity : Activity() {
         box.gravity = Gravity.CENTER
         box.setPadding(ui.dp(6f), ui.dp(12f), ui.dp(6f), ui.dp(12f))
         box.background = ui.round(ui.cell, 12f)
-        val n = ui.text(big, 24f, color, ui.bold)
+        val n = ui.text(big, 28f, color, ui.serif)
         n.gravity = Gravity.CENTER
         box.addView(n)
         val l = ui.text(small, 12f, ui.label2)
@@ -171,7 +171,7 @@ class HistoryActivity : Activity() {
             "draw" -> Pair("D", ui.gray)
             else -> Pair("–", ui.label3)
         }
-        val badge = ui.text(letter, 15f, Color.WHITE, ui.bold)
+        val badge = ui.text(letter, 15f, ui.ink, ui.bold)
         badge.gravity = Gravity.CENTER
         badge.background = ui.round(color, 100f)
         row.addView(badge, LinearLayout.LayoutParams(ui.dp(34f), ui.dp(34f)))

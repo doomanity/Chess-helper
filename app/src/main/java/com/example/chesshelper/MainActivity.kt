@@ -43,18 +43,19 @@ class MainActivity : Activity() {
     private fun build() {
         val c = Cfg.load(this)
         ui = Ios(this)
-        val (scroll, col) = ui.screen(this, "chess helper", "reads the board on your screen and shows the best moves")
+        val (scroll, col) = ui.screen(this, "Chess helper", "reads the board on your screen and shows the best moves")
         root = col
 
-        // ---- start / stop
-        root.addView(ui.bigButton("start") { start() }, ui.full(top = 18f))
-        var g = ui.group(root, null, "the helper needs to draw over other apps once. stop it here, from the side bar or the notification")
+        // ---- the hero: your last game's board, what the helper is doing, start / stop
+        root.addView(Hero.build(this, ui, c, ChessService.running, { start() }, {
+            stopService(Intent(this, ChessService::class.java))
+            ChessService.running = false
+            toast("stopped")
+            root.post { rebuild() }
+        }), ui.full(top = 16f))
+        var g = ui.group(root, null, "the helper draws over your chess app, android asks for this once. you can also stop it from the side bar or the notification")
         g.add(ui.navRow("allow draw over other apps", if (Settings.canDrawOverlays(this)) "on" else "off") {
             startActivity(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:$packageName")))
-        })
-        g.add(ui.buttonRow("stop", ui.red) {
-            stopService(Intent(this, ChessService::class.java))
-            toast("stopped")
         })
 
         // ---- game

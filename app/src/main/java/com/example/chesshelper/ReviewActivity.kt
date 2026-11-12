@@ -135,7 +135,7 @@ class ReviewActivity : Activity() {
 
     private fun build() {
         ui = Ios(this)
-        val (scroll, col) = ui.screen(this, "game review", "labels every move like chess.com. analysis only, it never picks a move for you")
+        val (scroll, col) = ui.screen(this, "Game review", "labels every move like chess.com. analysis only, it never picks a move for you")
         root = col
 
         // ---- where the game comes from
@@ -158,7 +158,7 @@ class ReviewActivity : Activity() {
         frame.addView(board)
         boardBox.addView(frame, ui.full())
         board.show(START_FEN, null, null, 0.5f, false)
-        caption = ui.text("start position", 20f, ui.label, ui.bold)
+        caption = ui.text("start position", 21f, ui.label, ui.serif)
         caption.setPadding(ui.dp(2f), ui.dp(14f), 0, 0)
         boardBox.addView(caption)
         detail = ui.text("", 15f, ui.label2)
@@ -439,7 +439,7 @@ class ReviewActivity : Activity() {
         box.gravity = Gravity.CENTER
         box.setPadding(ui.dp(10f), ui.dp(14f), ui.dp(10f), ui.dp(14f))
         box.background = ui.round(ui.cell2, 12f)
-        val n = ui.text(acc?.let { "$it" } ?: "-", 34f, ui.label, ui.bold)
+        val n = ui.text(acc?.let { "$it" } ?: "-", 38f, ui.label, ui.serif)
         n.gravity = Gravity.CENTER
         box.addView(n)
         val l = ui.text("$who accuracy", 13f, ui.label2)
