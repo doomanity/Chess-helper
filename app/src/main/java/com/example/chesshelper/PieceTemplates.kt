@@ -20,7 +20,32 @@ class PieceTemplates {
     val known: Int
         get() = (1..2).sumOf { c -> (1..6).count { t -> count(c, t) > 0 } }
 
-    fun clear() = lib.clear()
+    fun clear() { lib.clear(); version++ }
+
+    /** goes up when a shape is learned (the service saves the shapes then) */
+    @Volatile var version = 0
+        private set
+
+    /** all learned shapes as text, one per line: colour type then the mask as hex words */
+    fun encode(): String = buildString {
+        for ((k, l) in lib) for (m in l) {
+            append(k / 8).append(' ').append(k % 8)
+            for (w in m) append(' ').append(java.lang.Long.toHexString(w))
+            append('\n')
+        }
+    }
+
+    /** loads shapes saved with encode (adds to what is known) */
+    fun decode(text: String) {
+        for (line in text.lines()) {
+            val p = line.trim().split(' ')
+            if (p.size < 3) continue
+            val c = p[0].toIntOrNull() ?: continue
+            val t = p[1].toIntOrNull() ?: continue
+            val mask = try { LongArray(p.size - 2) { java.lang.Long.parseUnsignedLong(p[it + 2], 16) } } catch (e: Exception) { continue }
+            learn(c, t, mask)
+        }
+    }
 
     private fun ham(a: LongArray, b: LongArray): Int {
         var d = 0
@@ -34,6 +59,7 @@ class PieceTemplates {
         if (l.any { ham(it, mask) < 12 }) return // we already have almost the same picture
         if (l.size >= 6) l.removeAt(0)
         l.add(mask)
+        version++
     }
 
     /** distance to the best picture of each type (index 1..6), for debugging */

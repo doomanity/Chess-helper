@@ -112,6 +112,33 @@ class ChessService : Service(), SideBarHost, SharedPreferences.OnSharedPreferenc
     // positions remembered across games (on the phone)
     private var memory: AdviceMemory? = null
     @Volatile private var wantForget = false
+    private var savedShapes = -1
+
+    /** the piece shapes, saved per board look (the two square colors), so a later session reads mid-game at once */
+    private fun shapesFile(): File = File(filesDir, "piece_shapes.txt")
+
+    private fun loadShapes(tr: Tracker) {
+        try {
+            val f = shapesFile()
+            if (f.exists()) tr.templates.decode(f.readText())
+        } catch (_: Exception) {
+        }
+        savedShapes = tr.templates.version
+    }
+
+    private fun saveShapes(tr: Tracker) {
+        savedShapes = tr.templates.version
+        try {
+            val f = shapesFile()
+            val tmp = File(filesDir, "piece_shapes.tmp")
+            tmp.writeText(tr.templates.encode())
+            tmp.renameTo(f)
+        } catch (_: Exception) {
+        }
+    }
+    // the position being worked on, and the position the picture on screen belongs to
+    private var drawingFen: String? = null
+    private var modelFen: String? = null
     // the deep line: positions to work on in spare time, nearest first
     private class AheadJob(val fen: String, val ply: Int, val botTurn: Boolean)
     private val ahead = ArrayDeque<AheadJob>()
@@ -539,15 +566,16 @@ class ChessService : Service(), SideBarHost, SharedPreferences.OnSharedPreferenc
     /** an answer worked out before: this session first, then the phone's memory */
     private fun knownAdvice(fen: String, c: Cfg): Advice? {
         val k = Game.posKey(fen)
-        ready[k]?.let { return it }
+        ready[k]?.let { if (Game.fits(fen, it)) return it else ready.remove(k) }
         if (!c.remember) return null
         val m = memory?.advice(k, adviceSig(c)) ?: return null
+        if (!Game.fits(fen, m)) return null // a saved answer that doesn't fit this position: never use it
         ready[k] = m
         return m
     }
 
     private fun storeAdvice(fen: String, a: Advice, c: Cfg) {
-        if (a.cands.isEmpty()) return
+        if (a.cands.isEmpty() || !Game.fits(fen, a)) return
         val k = Game.posKey(fen)
         ready[k] = a
         if (c.remember) memory?.putAdvice(k, adviceSig(c), a)
@@ -555,13 +583,19 @@ class ChessService : Service(), SideBarHost, SharedPreferences.OnSharedPreferenc
 
     private fun knownGuesses(fen: String, c: Cfg): List<Pair<String, Float?>>? {
         val k = Game.posKey(fen)
-        guessCache[k]?.let { return it }
+        val legal = Game.legalUci(fen)
+        guessCache[k]?.let { g -> if (g.all { it.first in legal }) return g else guessCache.remove(k) }
         if (!c.remember) return null
-        return memory?.guesses(k, guessSig(c))?.also { guessCache[k] = it }
+        val g = memory?.guesses(k, guessSig(c)) ?: return null
+        if (!g.all { it.first in legal }) return null
+        guessCache[k] = g
+        return g
     }
 
     private fun storeGuesses(fen: String, g: List<Pair<String, Float?>>, c: Cfg) {
         if (g.isEmpty()) return
+        val legal = Game.legalUci(fen)
+        if (!g.all { it.first in legal }) return
         val k = Game.posKey(fen)
         guessCache[k] = g
         if (c.remember) memory?.putGuesses(k, guessSig(c), g)
@@ -678,7 +712,14 @@ class ChessService : Service(), SideBarHost, SharedPreferences.OnSharedPreferenc
         }
         review = LiveReview(stockfish ?: return, book)
         memory = AdviceMemory(File(filesDir, "advice_memory.tsv")).also { it.load() }
+        // version 1.21: answers saved by older versions may belong to the wrong position, start the memory fresh once
+        val pf = Cfg.prefs(this)
+        if (!pf.getBoolean("memory_wipe_v121", false)) {
+            memory?.clear()
+            pf.edit().putBoolean("memory_wipe_v121", true).apply()
+        }
         val tr = Tracker(c0.iAmWhite, c0.myTurnAtStart)
+        loadShapes(tr)
         tr.autoColor = c0.autoColor
         tracker = tr
 
@@ -880,8 +921,18 @@ class ChessService : Service(), SideBarHost, SharedPreferences.OnSharedPreferenc
         myTurnShown = false
         var step = tracker.update(cls, reads, now)
         if (step == Tracker.Step.STARTED) savesLeft = c.savesPerGame
+        if (tracker.templates.version != savedShapes) saveShapes(tracker)
 
-        if (step == Tracker.Step.NEED_AI || step == Tracker.Step.RESYNC || (tracker.needsVerify && step != Tracker.Step.UNREADABLE)) {
+        // without the AI (the default): the board is read on the phone only, from the piece shapes it learned.
+        // stuck: say what helps and keep looking (every read tries the shapes again)
+        val askAi = c.useAi && c.apiKey.isNotBlank()
+        if (!askAi && (step == Tracker.Step.NEED_AI || step == Tracker.Step.RESYNC)) {
+            say(if (tracker.templates.known < 10) "show the start position once (a new game) so I learn this board's pieces"
+                else "can't follow this position yet, looking again...")
+            debugLine(tracker, step)
+            return Tracker.Step.UNREADABLE
+        }
+        if (askAi && (step == Tracker.Step.NEED_AI || step == Tracker.Step.RESYNC || (tracker.needsVerify && step != Tracker.Step.UNREADABLE))) {
             val starting = step == Tracker.Step.NEED_AI || step == Tracker.Step.RESYNC
             if (now < aiBlockedUntil) {
                 say("waiting a bit before asking haiku again")
@@ -923,13 +974,15 @@ class ChessService : Service(), SideBarHost, SharedPreferences.OnSharedPreferenc
             // your premove drawn early, or a piece in your hand: the position didn't change, put the picture back
             say("waiting for the bot (premove) or your move...")
             debugLine(tracker, step)
-            lastModel?.let { showModel(it, restart = false) }
+            // only the picture of this very position (never an older game's arrows)
+            if (modelFen != null && modelFen == tracker.board?.fen) lastModel?.let { showModel(it, restart = false) }
             myTurnShown = wasMyTurnShown
             return step
         }
 
         debugLine(tracker, step)
         val b = tracker.board ?: return step
+        drawingFen = b.fen
         if (tracker.logVersion != savedLogVersion) {
             // keep a record of the game so the review screen can open it, and in the match history
             savedLogVersion = tracker.logVersion
@@ -1646,6 +1699,7 @@ class ChessService : Service(), SideBarHost, SharedPreferences.OnSharedPreferenc
         overlayShown = true
         forcedClear = false
         lastModel = m
+        modelFen = drawingFen
         val g = BoardGeom(m.board.left.toInt(), m.board.top.toInt(), m.board.width().toInt())
         val ends = HashSet<Int>()
         val crossed = HashSet<Int>()

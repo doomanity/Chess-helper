@@ -188,7 +188,8 @@ class MainActivity : Activity() {
         g.add(ui.navRow("match history", "${GameHistory.all(this).size} games", tint = ui.blue) { startActivity(Intent(this, HistoryActivity::class.java)) })
 
         // ---- claude
-        g = ui.group(root, "claude", "only used once when you start in the middle of a game")
+        g = ui.group(root, "reading the board", "the phone reads the board by itself, in real time, from the piece shapes it learns at a game's start position (saved for next time). the AI is only a backup for when it gets stuck, and costs api credit")
+        g.add(ui.toggleRow("ask the AI when stuck", c.useAi) { on -> save { it.putBoolean("use_ai", on) } })
         val (keyRow, kBox) = ui.fieldRow("api key", c.apiKey, "sk-ant-...", secret = true)
         keyBox = kBox
         g.add(keyRow)
@@ -242,8 +243,8 @@ class MainActivity : Activity() {
             toast("type the maia3 pc address first (run tools/maia3_server.py on your pc)")
             return
         }
-        if (c.apiKey.isBlank()) {
-            toast("no api key: works when you start from the normal start position")
+        if (c.useAi && c.apiKey.isBlank()) {
+            toast("no api key: the AI backup is off, the phone reads the board alone")
         }
         if (!Settings.canDrawOverlays(this)) {
             toast("overlay check says off, trying anyway")

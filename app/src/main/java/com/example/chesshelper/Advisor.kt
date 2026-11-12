@@ -34,11 +34,18 @@ class Advisor(private val sf: UciEngine, private val lister: MoveLister?) {
                 pickErr = e.message ?: "failed"
             }
         }.also { it.start() } else null
-        val lines = try {
+        val raw = try {
             sf.analyse(fen, if (maxPower) maxOf(ms, 2500) else ms, if (maxPower) 1 else if (quick) maxOf(1, n) else maxOf(8, n))
         } finally {
             pickThread?.join()
         }
+        // only moves that are legal here: an engine answer that doesn't fit this position is never shown or saved
+        val legal = Game.legalUci(fen)
+        if (raw.isNotEmpty() && raw[0].move !in legal) {
+            listerError = null
+            return Advice(emptyList(), 0, null, null, emptyList()) // the engine was out of step: think again next read
+        }
+        val lines = raw.filter { it.move in legal }
         if (lines.isEmpty()) return Advice(emptyList(), 0, null, null, emptyList())
         val top = lines[0]
         val whiteToMove = fen.split(" ").getOrNull(1) != "b"
@@ -54,7 +61,7 @@ class Advisor(private val sf: UciEngine, private val lister: MoveLister?) {
         }
 
         val picks = ArrayList<String>()
-        picks.addAll(picked)
+        picks.addAll(picked.filter { it in legal })
         listerError = pickErr
         if (picks.isEmpty() && sf.isLimited && !quick) {
             // the difficulty setting makes stockfish play worse on purpose: its own pick goes first

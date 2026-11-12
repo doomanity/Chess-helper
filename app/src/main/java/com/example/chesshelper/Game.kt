@@ -124,6 +124,21 @@ object Game {
 
     fun posKey(fen: String): String = fen.split(" ").take(4).joinToString(" ")
 
+    /** every legal move in this position, like "e2e4" or "e7e8q" (empty if the FEN is broken) */
+    fun legalUci(fen: String): Set<String> = try {
+        val b = Board()
+        b.loadFromFen(fen)
+        b.legalMoves().map { it.toString() }.toSet()
+    } catch (e: Exception) {
+        emptySet()
+    }
+
+    /** true when every move of the answer is legal in this position (a saved answer must fit where we are) */
+    fun fits(fen: String, a: Advice): Boolean {
+        val legal = legalUci(fen)
+        return a.cands.isNotEmpty() && a.cands.all { it.move in legal }
+    }
+
     fun placement(b: Board): String = b.fen.substringBefore(' ')
 
     // ------------------------------------------------------------------ occupancy (which squares have a white / black piece)

@@ -22,7 +22,7 @@ class Tracker(var iAmWhite: Boolean, private val myTurnAtStart: Boolean) {
     private var holdCount = 0
 
     /** true if this screen is the same moment we are already waiting out, for long enough to stop waiting */
-    private fun heldTooLong(screen: IntArray, nowMs: Long): Boolean {
+    private fun heldTooLong(screen: IntArray, nowMs: Long, limit: Long = HOLD_MS): Boolean {
         val hs = holdScreen
         if (hs == null || Game.mismatch(hs, screen) > 0) {
             holdScreen = screen.copyOf()
@@ -31,7 +31,7 @@ class Tracker(var iAmWhite: Boolean, private val myTurnAtStart: Boolean) {
             return false
         }
         holdCount++
-        return if (nowMs == 0L) holdCount > 3 else nowMs - holdSince > HOLD_MS
+        return if (nowMs == 0L) holdCount > 3 else nowMs - holdSince > limit
     }
 
     /** auto color: your side is the one at the bottom of the screen (every chess app shows your pieces there) */
@@ -105,6 +105,7 @@ class Tracker(var iAmWhite: Boolean, private val myTurnAtStart: Boolean) {
         const val MAX_PLY = 3
         const val FAST_PLY = 8  // fast play: how many moves between two reads we can still follow
         const val REWIND_PLIES = 40  // how far back a takeback can go and still be followed
+        const val HELD_MS = 3500L   // a piece in your hand that doesn't move: after this we stop waiting
         const val HOLD_MS = 9000L   // the longest we wait out a premove picture or a lifted piece
         const val LOST_MS = 2500L   // how long a position we can't explain has to stay on screen before we start over
         const val SUSPECT = 3       // this many piece types that look wrong means our board is probably wrong
@@ -292,6 +293,11 @@ class Tracker(var iAmWhite: Boolean, private val myTurnAtStart: Boolean) {
                 if (reads != null) learnFrom(b, wb, screen, reads, all = true)
                 return Step.STARTED
             }
+            // the middle of a game, first look: the piece shapes we learned (saved from earlier games) read it
+            if (reads != null && templates.known >= 10) {
+                val seen0 = templates.recognizeAll(reads, screen)
+                if (resyncFromVision(screen, seen0, reads, wb)) return Step.STARTED
+            }
             return Step.NEED_AI
         }
 
@@ -435,7 +441,8 @@ class Tracker(var iAmWhite: Boolean, private val myTurnAtStart: Boolean) {
         // (checked after the promoted pieces, so a misread promoted piece that moved is fixed first)
         if (looksHeld(known, occ)) {
             clearMisses()
-            if (!heldTooLong(screen, nowMs)) return Step.HOLD
+            // a hand on a piece moves; a picture that stays the same this long is a misread move, read it again
+            if (!heldTooLong(screen, nowMs, HELD_MS)) return Step.HOLD
         }
         val ms = missScreen
         if (ms == null || Game.mismatch(ms, screen) > 0) {
@@ -467,7 +474,7 @@ class Tracker(var iAmWhite: Boolean, private val myTurnAtStart: Boolean) {
     private fun resyncAs(screen: IntArray, seen: IntArray, reads: Array<SquareRead>, wb: Boolean): Boolean {
         val types = seen.copyOf()
         val unknown = (0 until 64).filter { screen[it] != BoardVision.EMPTY && seen[it] == 0 }
-        if (unknown.size > 3) return false
+        if (unknown.size > 6) return false
         val limit = intArrayOf(0, 8, 2, 2, 2, 1, 1)
         for (i in unknown) {
             val colour = screen[i]
@@ -478,7 +485,9 @@ class Tracker(var iAmWhite: Boolean, private val myTurnAtStart: Boolean) {
         }
         val placement = Game.placementFromTypes(Game.screenToChess(screen, wb), Game.screenToChess(types, wb))
         if (!Game.isValidPlacement(placement)) return false
-        val whiteToMove = Game.turnFromChecks(placement) ?: me(wb) // no hint: assume it is our turn
+        // whose turn: a king in check must move, else the site's last move highlight (the side that just moved
+        // waits), else assume it is our turn
+        val whiteToMove = Game.turnFromChecks(placement) ?: lastMoverWhite(screen, reads, wb)?.not() ?: me(wb)
         board = Game.newBoard(placement, whiteToMove)
         whiteBottom = wb
         board?.let { restartLog(it) }
@@ -486,6 +495,37 @@ class Tracker(var iAmWhite: Boolean, private val myTurnAtStart: Boolean) {
         suspicious = 0
         clearMisses()
         return true
+    }
+
+    /**
+     * which side made the last move, from the site's highlight: chess sites tint the two squares of the last move.
+     * the board has two normal square colors; a square whose background is neither is highlighted. the piece on a
+     * highlighted square is the one that just moved. null when there is no clear highlight
+     */
+    fun lastMoverWhite(screen: IntArray, reads: Array<SquareRead>, wb: Boolean): Boolean? {
+        fun dist(a: Int, b: Int): Int {
+            val dr = ((a shr 16) and 255) - ((b shr 16) and 255)
+            val dg = ((a shr 8) and 255) - ((b shr 8) and 255)
+            val db = (a and 255) - (b and 255)
+            return kotlin.math.abs(dr) + kotlin.math.abs(dg) + kotlin.math.abs(db)
+        }
+        // the normal light and dark square colors: the most common background on each square color
+        fun usual(light: Boolean): Int? {
+            val bgs = (0 until 64).filter { ((it / 8 + it % 8) % 2 == 0) == light }.map { reads[it].bg }.filter { it != 0 }
+            if (bgs.isEmpty()) return null
+            return bgs.maxByOrNull { b -> bgs.count { dist(it, b) < 30 } }
+        }
+        val lightBg = usual(true) ?: return null
+        val darkBg = usual(false) ?: return null
+        val lit = (0 until 64).filter { i ->
+            val bg = reads[i].bg
+            val normal = if ((i / 8 + i % 8) % 2 == 0) lightBg else darkBg
+            bg != 0 && dist(bg, normal) > 45
+        }
+        if (lit.isEmpty() || lit.size > 3) return null // none, or not a clear two-square highlight
+        val movers = lit.map { screen[it] }.filter { it != BoardVision.EMPTY }.distinct()
+        if (movers.size != 1) return null
+        return movers[0] == BoardVision.WHITE
     }
 
     /** remembers how the pieces of this board look (all of them, or only the kinds we haven't seen yet) */

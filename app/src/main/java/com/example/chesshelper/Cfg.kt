@@ -6,6 +6,7 @@ import android.content.SharedPreferences
 /** all the settings, read from the app's saved preferences (the app screen and the side menu both write them) */
 class Cfg(p: SharedPreferences) {
     val apiKey = (p.getString("api_key", "") ?: "").trim()
+    val useAi = p.getBoolean("use_ai", false)   // ask the AI to read the board when stuck (off: the phone reads it alone)
     val model = (p.getString("model", "claude-haiku-5-5") ?: "claude-haiku-5-5").trim()
     val colorMode = p.getString("color", "auto") ?: "auto"     // auto (the side at the bottom of the board), white, black
     val autoColor = colorMode == "auto"

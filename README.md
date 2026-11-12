@@ -79,14 +79,11 @@ use it against computer bots only: chess.com and lichess ban accounts that let a
 
 ## reading the board
 
-- a new game is seen by itself as soon as the start position shows up, either way up. the way the board faces tells your side, so a game as black right after a game as white needs nothing (with "i play: auto")
-- started in the middle of a game, your side is worked out from several clues: where the pawns stand (they only move forward), where the kings are, the board's coordinates, and which half has more white pieces
-- pause clears the board, and nothing from before the pause comes back after resume
-- premoves: when you premove during the bot's turn, the chess app already draws your move. the helper waits for the bot instead of believing it, then reads the bot's move and your premove together. a piece you are holding (lifted off its square) doesn't count as a move either
-- a board check every few seconds compares the squares themselves with the last read, so a change too small to notice still gets read
-- the bot's guesses show up faster (a shorter first search, and less waiting for the pc or illusion)
-- if you (or the bot) move while the helper is still drawing, it notices and reads the board again right away, so the suggestions don't get stuck on the bot's turn
-- a promoted piece is looked at a few more times after the promotion (the first look can catch the piece picker or the animation). if it was misread, it is fixed by itself, also when the piece already moved
+the phone reads the board by itself, no AI and no api cost. it checks the screen many times a second and follows every move from the piece shapes it learns at a game's start position. the shapes are saved, so a later session opened in the middle of a game reads it at once (whose turn it is comes from a king in check or the site's last move highlight). it follows fast play (up to 8 moves between two reads), takebacks (a coach rewinding), premoves and a piece held in your hand.
+
+every suggestion is checked to be a legal move in the position on screen before it is drawn or saved, so an old game's arrows can never show up.
+
+the AI (claude) is only a backup, off by default ("ask the AI when stuck" under reading the board, needs an api key). before the shapes are learned the first time, show a game's start position once.
 
 ## look
 

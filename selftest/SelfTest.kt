@@ -473,8 +473,8 @@ fun holdDrag() {
             if (there != com.github.bhlangonijr.chesslib.Piece.NONE) dragged.unsetPiece(there, at)
             dragged.setPiece(q, at)
         }
-        // held for about 4 seconds (longer than the "lost" wait)
-        for (i in 1..6) {
+        // held for about 3 seconds (longer than the "lost" wait, shorter than the still-hand limit)
+        for (i in 1..4) {
             val st = ph.look(render(sc, dragged, null, null))
             check(st == Tracker.Step.HOLD, "dragged piece should be held (white=$white, look $i), was $st")
         }
@@ -484,7 +484,7 @@ fun holdDrag() {
         val noisy = boardOf(dragged.fen)
         val theirPawn = if (white) com.github.bhlangonijr.chesslib.Piece.BLACK_PAWN else com.github.bhlangonijr.chesslib.Piece.WHITE_PAWN
         for (sq in listOf("A4", "C4", "B5")) noisy.setPiece(theirPawn, com.github.bhlangonijr.chesslib.Square.valueOf(sq))
-        for (i in 1..4) {
+        for (i in 1..2) {
             val st = ph.look(render(sc, noisy, null, null))
             check(st == Tracker.Step.HOLD, "held piece with the site's hints should be held (white=$white, look $i), was $st")
         }
@@ -504,7 +504,7 @@ fun holdDrag() {
             "start with one misread square should start a new game as ${if (!white) "white" else "black"} (was $st, whiteBottom=${tr.whiteBottom})")
         ph2.look(render(sc2, start, null, null))
         check(samePosition(tr, start), "start position after the misread square (white=$white)")
-        println("  ${if (white) "white" else "black"}: dragged piece held 4s then the move read; misread start ok")
+        println("  ${if (white) "white" else "black"}: dragged piece held 3s then the move read; misread start ok")
     }
 }
 
@@ -553,6 +553,33 @@ fun takeback() {
         check(samePosition(tr, back7), "back 7 moves and a new move (white=$white): $st\n    truth   ${back7.fen}\n    tracker ${tr.board?.fen}")
         check(tr.playedMoves.size == line.size - 7 + 1, "the record is cut back (white=$white): ${tr.playedMoves.size} moves")
         println("  ${if (white) "white" else "black"}: back 2, back 7 + a new move, record cut back ok")
+    }
+}
+
+/**
+ * no AI: a new session opened in the middle of a game reads the board from the piece shapes saved by an earlier
+ * session, and tells whose turn it is from the last move highlight
+ */
+fun noAiMidGame() {
+    println("== no AI: mid-game first look from saved piece shapes")
+    val line = "e2e4 e7e5 g1f3 b8c6 f1c4 g8f6 d2d3 f8c5 c2c3 d7d6 e1g1 e8g8 b1d2 a7a6".split(" ")
+    for (white in listOf(true, false)) for (cut in listOf(9, 14)) {
+        val sc = Scene(looks[0], 1189, 2576, 78, 918, 1032, white, Random(80L + cut))
+        // an earlier session learned the shapes at the start position
+        val first = Tracker(white, true); first.autoColor = true
+        Phone(first, sc).look(render(sc, Board(), null, null))
+        val saved = first.templates.encode()
+        // a new session: shapes loaded, opened after `cut` moves, the last move highlighted
+        val tr = Tracker(white, true); tr.autoColor = true
+        tr.templates.decode(saved)
+        val truth = Board()
+        var last: com.github.bhlangonijr.chesslib.move.Move? = null
+        for (u in line.take(cut)) last = playMove(truth, u)
+        val st = Phone(tr, sc).look(render(sc, truth, last?.from?.ordinal, last?.to?.ordinal))
+        val sameTurn = tr.board?.sideToMove == truth.sideToMove
+        check(st == Tracker.Step.STARTED && tr.board?.fen?.substringBefore(' ') == truth.fen.substringBefore(' ') && sameTurn,
+            "mid-game read (white=$white, after $cut moves): $st\n    truth   ${truth.fen}\n    tracker ${tr.board?.fen}")
+        println("  ${if (white) "white" else "black"} at the bottom, after $cut moves: board and turn read with no AI ok")
     }
 }
 
@@ -733,6 +760,7 @@ fun main(args: Array<String>) {
     holdDrag()
     fastPlay()
     takeback()
+    noAiMidGame()
     midGame()
     println("== simulated games")
     var seed = 100L
