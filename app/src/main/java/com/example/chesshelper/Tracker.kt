@@ -106,6 +106,7 @@ class Tracker(var iAmWhite: Boolean, private val myTurnAtStart: Boolean) {
         const val FAST_PLY = 8  // fast play: how many moves between two reads we can still follow
         const val REWIND_PLIES = 40  // how far back a takeback can go and still be followed
         const val HELD_MS = 3500L   // a piece in your hand that doesn't move: after this we stop waiting
+        const val PREMOVE_MS = 30000L // premoves drawn: the bot may think long, wait for it
         const val HOLD_MS = 9000L   // the longest we wait out a premove picture or a lifted piece
         const val LOST_MS = 2500L   // how long a position we can't explain has to stay on screen before we start over
         const val SUSPECT = 3       // this many piece types that look wrong means our board is probably wrong
@@ -207,6 +208,76 @@ class Tracker(var iAmWhite: Boolean, private val myTurnAtStart: Boolean) {
     }
 
     /**
+     * the real moves (up to 3) that explain the screen with premoves still drawn: after them it's the bot's turn,
+     * every bot piece is where the screen shows it (at most 2 of them covered by your premoved pieces taking them),
+     * and the rest of the difference is your pieces (at most 3 premoves). the fewest leftover squares, then the
+     * fewest moves. empty list = no move, only premoves drawn. null = this isn't a premove picture
+     */
+    private fun premoveFit(known: Board, occ: IntArray, lit: Set<Int>): List<com.github.bhlangonijr.chesslib.move.Move>? {
+        val mine = if (meWhite()) BoardVision.WHITE else BoardVision.BLACK
+        val theirs = if (mine == BoardVision.WHITE) BoardVision.BLACK else BoardVision.WHITE
+        val meSide = if (meWhite()) Side.WHITE else Side.BLACK
+        // on your turn this is only for after the bot moved: some bot piece left its square or a new one shows
+        // (your hand on a piece changes only your side's squares)
+        if (known.sideToMove == meSide) {
+            val k = Game.occOf(known)
+            val botMoved = (0 until 64).any { (k[it] == theirs && occ[it] == BoardVision.EMPTY) || (occ[it] == theirs && k[it] != theirs) }
+            if (!botMoved) return null
+        }
+        var bestUnlit = Int.MAX_VALUE
+        var best: List<com.github.bhlangonijr.chesslib.move.Move>? = null
+        var bestLeft = Int.MAX_VALUE
+        var unlit = 0
+        val path = ArrayList<com.github.bhlangonijr.chesslib.move.Move>()
+        fun score(b: Board): Int {
+            if (b.sideToMove == meSide) return -1 // must be the bot's turn (your premoves wait for it)
+            val cur = Game.occOf(b)
+            var covered = 0
+            var left = 0
+            unlit = 0
+            for (i in 0 until 64) {
+                if (cur[i] == occ[i]) continue
+                when {
+                    cur[i] == theirs && occ[i] == mine -> covered++   // your premove takes it, drawn already
+                    cur[i] == theirs || occ[i] == theirs -> return -1 // a bot piece doesn't match: not this
+                    else -> left++                                    // your piece: a premove still drawn
+                }
+                if (i !in lit) unlit++ // a waiting premove's squares are tinted by the site
+            }
+            if (covered > 2) return -1
+            return left + covered
+        }
+        fun walk(b: Board, depth: Int) {
+            val sc = score(b)
+            // on your turn the bot must have moved too (else it's your hand on a piece, not premoves)
+            val ok = known.sideToMove != meSide || path.size >= 2
+            if (ok && (sc in 1..6 || (sc == 0 && path.isEmpty()))) {
+                // the fewest leftover squares, then leftovers on tinted squares, then the fewest moves
+                val better = sc < bestLeft || (sc == bestLeft && (unlit < bestUnlit ||
+                    (unlit == bestUnlit && path.size < (best?.size ?: 99))))
+                if (better) {
+                    bestLeft = sc
+                    bestUnlit = unlit
+                    best = ArrayList(path)
+                }
+            }
+            if (depth == 0) return
+            val moves = try { b.legalMoves() } catch (e: Exception) { return }
+            for (m in moves) {
+                b.doMove(m)
+                path.add(m)
+                walk(b, depth - 1)
+                path.removeAt(path.size - 1)
+                b.undoMove()
+            }
+        }
+        walk(known, 3)
+        // an exact fit (nothing left over) is a normal move, the moves check finds those: only premove pictures here
+        if (bestLeft == 0 && (best?.isNotEmpty() == true)) return null
+        return best
+    }
+
+    /**
      * a piece of yours in your hand (held or being dragged). the chess site also draws its own things then: the
      * lifted piece under your finger, a frame on the square you hover, hint dots and rings around pieces you could
      * take. so only the pieces we know count: at most one of yours is gone from its square (the one you hold) and at
@@ -302,6 +373,8 @@ class Tracker(var iAmWhite: Boolean, private val myTurnAtStart: Boolean) {
         }
 
         val seen = if (reads != null) templates.recognizeAll(reads, screen) else null
+        // squares the site tints (last move, premoves still waiting), as chess squares
+        val litChess = if (reads != null) litSquares(reads).map { Game.chessIndex(it, wb) }.toSet() else emptySet()
         val seenChess = seen?.let { Game.screenToChess(it, wb) }
 
         // every explanation gets a cost: 2 per move, 3 per misread square, 3 extra if we have to
@@ -316,6 +389,8 @@ class Tracker(var iAmWhite: Boolean, private val myTurnAtStart: Boolean) {
             if (bestCost <= 2 * d) break // nothing deeper can be cheaper
             for (useOther in booleanArrayOf(false, true)) {
                 if (useOther && d == 0) continue
+                // sure whose turn it is: the other side to move only as the one-premove picture (d = 1)
+                if (useOther && turnSure && d > 1) continue
                 val b = if (useOther) other else known
                 val all = Game.hitsAt(b, occ, d)
                 val exact = all.filter { it.mis == 0 }
@@ -336,12 +411,15 @@ class Tracker(var iAmWhite: Boolean, private val myTurnAtStart: Boolean) {
         }
         // nothing within 3 moves: you and the bot played fast. look further (up to FAST_PLY moves), the smart way
         // (also when the only fit so far needed the wrong side to move or a misread square: a longer exact fit wins)
+        var deepOdd = 0
+        val beforeDeep = bestHit
         if ((bestHit == null || bestCost > 2 * (MAX_PLY + 1)) && !promoUnsure) {
             for (d in MAX_PLY + 1..FAST_PLY) {
                 if (2 * d >= bestCost) break
                 val exact = Game.fastHits(known, occ, d, if (d <= 6) 60000 else 150000)
                 if (exact.isNotEmpty()) {
                     val h = Game.pickNatural(exact, known, seenChess)
+                    deepOdd = Game.oddnessOf(h, known)
                     // the piece types we see must agree, or it is a look-alike: better to check again than guess
                     if (seenChess != null) {
                         Game.play(known, h)
@@ -354,6 +432,26 @@ class Tracker(var iAmWhite: Boolean, private val myTurnAtStart: Boolean) {
                     bestOther = false
                     bestD = d
                     break
+                }
+            }
+        }
+        // your premoves (one or several): chess.com draws each premoved piece on its square before it is played.
+        // the bot's pieces show the real position; your pieces may also show premoves still waiting. so: the real
+        // moves (0 to 3) after which every bot piece matches the screen and it's the bot's turn, with the rest of the
+        // difference only your pieces. 0 moves = just premoves drawn: wait. never invent moves to explain them
+        // a deep answer that needs a piece to move twice loses to the simpler premove answer
+        val deepOnly = beforeDeep == null && bestHit != null && bestD > MAX_PLY && deepOdd > 0
+        if ((bestHit == null || deepOnly) && !promoUnsure) {
+            val pre = premoveFit(known, occ, litChess)
+            if (pre != null) {
+                if (pre.isEmpty()) {
+                    clearMisses()
+                    if (!heldTooLong(screen, nowMs, PREMOVE_MS)) return Step.HOLD
+                } else {
+                    bestHit = Game.Hit(pre, 0)
+                    bestCost = 2 * pre.size
+                    bestOther = false
+                    bestD = pre.size
                 }
             }
         }
@@ -503,6 +601,15 @@ class Tracker(var iAmWhite: Boolean, private val myTurnAtStart: Boolean) {
      * highlighted square is the one that just moved. null when there is no clear highlight
      */
     fun lastMoverWhite(screen: IntArray, reads: Array<SquareRead>, wb: Boolean): Boolean? {
+        val lit = litSquares(reads)
+        if (lit.isEmpty() || lit.size > 3) return null // none, or not a clear two-square highlight
+        val movers = lit.map { screen[it] }.filter { it != BoardVision.EMPTY }.distinct()
+        if (movers.size != 1) return null
+        return movers[0] == BoardVision.WHITE
+    }
+
+    /** the screen squares (row 0 = top) whose background is tinted: neither of the board's two square colors */
+    fun litSquares(reads: Array<SquareRead>): List<Int> {
         fun dist(a: Int, b: Int): Int {
             val dr = ((a shr 16) and 255) - ((b shr 16) and 255)
             val dg = ((a shr 8) and 255) - ((b shr 8) and 255)
@@ -515,17 +622,13 @@ class Tracker(var iAmWhite: Boolean, private val myTurnAtStart: Boolean) {
             if (bgs.isEmpty()) return null
             return bgs.maxByOrNull { b -> bgs.count { dist(it, b) < 30 } }
         }
-        val lightBg = usual(true) ?: return null
-        val darkBg = usual(false) ?: return null
-        val lit = (0 until 64).filter { i ->
+        val lightBg = usual(true) ?: return emptyList()
+        val darkBg = usual(false) ?: return emptyList()
+        return (0 until 64).filter { i ->
             val bg = reads[i].bg
             val normal = if ((i / 8 + i % 8) % 2 == 0) lightBg else darkBg
             bg != 0 && dist(bg, normal) > 45
         }
-        if (lit.isEmpty() || lit.size > 3) return null // none, or not a clear two-square highlight
-        val movers = lit.map { screen[it] }.filter { it != BoardVision.EMPTY }.distinct()
-        if (movers.size != 1) return null
-        return movers[0] == BoardVision.WHITE
     }
 
     /** remembers how the pieces of this board look (all of them, or only the kinds we haven't seen yet) */

@@ -583,6 +583,53 @@ fun noAiMidGame() {
     }
 }
 
+/** two premoves: both drawn while the bot thinks, one goes through with each bot move */
+fun multiPremove() {
+    println("== two premoves")
+    fun drawn(b: Board, moves: List<String>): Board {
+        val c = boardOf(b.fen)
+        for (u in moves) {
+            val f = com.github.bhlangonijr.chesslib.Square.valueOf(u.substring(0, 2).uppercase())
+            val t = com.github.bhlangonijr.chesslib.Square.valueOf(u.substring(2, 4).uppercase())
+            val p = c.getPiece(f)
+            c.unsetPiece(p, f)
+            val there = c.getPiece(t)
+            if (there != com.github.bhlangonijr.chesslib.Piece.NONE) c.unsetPiece(there, t)
+            c.setPiece(p, t)
+        }
+        return c
+    }
+    for (white in listOf(true, false)) {
+        val sc = Scene(looks[0], 1189, 2576, 78, 918, 1032, white, Random(90))
+        val truth = Board(); val tr = Tracker(white, true); tr.autoColor = true; val ph = Phone(tr, sc)
+        ph.look(render(sc, truth, null, null))
+        val opening = if (white) "e2e4 e7e5 g1f3" else "e2e4 e7e5 g1f3 b8c6"
+        for (u in opening.split(" ")) { val mv = playMove(truth, u); ph.look(render(sc, truth, mv.from.ordinal, mv.to.ordinal)) }
+        val before = tr.board?.fen
+        val pre = if (white) listOf("f1c4", "d2d3") else listOf("g8f6", "f8c5")
+        val bot = if (white) listOf("b8c6", "g8f6") else listOf("f1c4", "d2d3")
+        // both premoves drawn, the bot thinking
+        for (i in 1..3) {
+            val st = ph.look(render(sc, drawn(truth, pre), null, null))
+            check(st == Tracker.Step.HOLD && tr.board?.fen == before, "two premoves drawn should be held (white=$white), was $st\n    tracker ${tr.board?.fen}")
+        }
+        // the bot moves, premove 1 goes through, premove 2 still drawn
+        playMove(truth, bot[0]); playMove(truth, pre[0])
+        // chess.com tints a waiting premove's two squares
+        val pf = com.github.bhlangonijr.chesslib.Square.valueOf(pre[1].substring(0, 2).uppercase()).ordinal
+        val pt = com.github.bhlangonijr.chesslib.Square.valueOf(pre[1].substring(2, 4).uppercase()).ordinal
+        var st = ph.look(render(sc, drawn(truth, pre.drop(1)), pf, pt))
+        check(samePosition(tr, truth), "bot move + premove 1, premove 2 drawn (white=$white): $st\n    truth   ${truth.fen}\n    tracker ${tr.board?.fen}")
+        st = ph.look(render(sc, drawn(truth, pre.drop(1)), pf, pt))
+        check(samePosition(tr, truth), "premove 2 still drawn, nothing new (white=$white): $st")
+        // the bot moves again, premove 2 goes through
+        playMove(truth, bot[1]); playMove(truth, pre[1])
+        st = ph.look(render(sc, truth, null, null))
+        check(samePosition(tr, truth), "bot move + premove 2 (white=$white): $st\n    truth   ${truth.fen}\n    tracker ${tr.board?.fen}")
+        println("  ${if (white) "white" else "black"}: two premoves held, then followed one by one ok")
+    }
+}
+
 /** the lost-track case: the misread queen moves like a knight before we had a second look */
 fun promoLost() {
     println("== misread promotion, then the piece moves")
@@ -761,6 +808,7 @@ fun main(args: Array<String>) {
     fastPlay()
     takeback()
     noAiMidGame()
+    multiPremove()
     midGame()
     println("== simulated games")
     var seed = 100L

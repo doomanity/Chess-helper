@@ -323,13 +323,14 @@ object Game {
     fun fastHits(b: Board, occ: IntArray, depth: Int, budget: Int = 60000): List<Hit> {
         val hits = ArrayList<Hit>()
         val left = intArrayOf(budget)
-        fastCollect(b, occ, depth, ArrayList(), hits, left, 2)
+        fastCollect(b, occ, depth, ArrayList(), hits, left, 2, IntArray(64) { it })
         return hits
     }
 
     // free = moves still allowed from a square that already looks right (a pawn leaves d2 and a knight lands there
     // later in the same burst): two per sequence
-    private fun fastCollect(b: Board, occ: IntArray, depth: Int, path: ArrayList<Move>, out: ArrayList<Hit>, left: IntArray, free: Int) {
+    // origin[sq] = the square the piece now on sq started from in this sequence (sq itself if it hasn't moved)
+    private fun fastCollect(b: Board, occ: IntArray, depth: Int, path: ArrayList<Move>, out: ArrayList<Hit>, left: IntArray, free: Int, origin: IntArray) {
         if (left[0]-- <= 0) return
         val cur = occOf(b)
         val mis = mismatch(cur, occ)
@@ -358,12 +359,21 @@ object Game {
             val from = mv.from.ordinal
             val settled = cur[from] == occ[from]
             if (settled && free == 0) continue
+            // never a piece coming back to where it started (made up moves that "explain" premoves drawn early)
+            val to = mv.to.ordinal
+            if (origin[from] == to) continue
             if (b.getPiece(mv.to).pieceType == PieceType.KING) continue
+            val oFrom = origin[from]
+            val oTo = origin[to]
+            origin[to] = oFrom
+            origin[from] = from
             b.doMove(mv)
             path.add(mv)
-            fastCollect(b, occ, depth - 1, path, out, left, if (settled) free - 1 else free)
+            fastCollect(b, occ, depth - 1, path, out, left, if (settled) free - 1 else free, origin)
             path.removeAt(path.size - 1)
             b.undoMove()
+            origin[from] = oFrom
+            origin[to] = oTo
             if (out.size > 400 || left[0] <= 0) return
         }
     }
@@ -372,6 +382,29 @@ object Game {
      * of several move orders that leave the same squares filled, the natural one: fewest pieces moving twice, no
      * king walks (castling is fine), then the one whose piece types fit what we see
      */
+    /** how odd a move sequence looks (pieces moving twice, king walks): 0 = natural */
+    fun oddnessOf(h: Hit, b: Board): Int = pickNaturalOdd(h, b)
+
+    private fun pickNaturalOdd(h: Hit, b: Board): Int {
+        var n = 0
+        val landed = HashSet<Square>()
+        var done = 0
+        try {
+            for (m in h.path) {
+                val p = b.getPiece(m.from)
+                if (m.from in landed) n += 2
+                val castle = p.pieceType == PieceType.KING && Math.abs(m.from.file.ordinal - m.to.file.ordinal) == 2
+                if (p.pieceType == PieceType.KING && !castle) n += 3
+                landed.add(m.to)
+                b.doMove(m)
+                done++
+            }
+        } finally {
+            repeat(done) { b.undoMove() }
+        }
+        return n
+    }
+
     fun pickNatural(hits: List<Hit>, b: Board, typesSeen: IntArray?): Hit {
         fun oddness(h: Hit): Int {
             var n = 0
