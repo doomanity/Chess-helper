@@ -719,7 +719,7 @@ class ChessService : Service(), SideBarHost, SharedPreferences.OnSharedPreferenc
             pf.edit().putBoolean("memory_wipe_v121", true).apply()
         }
         val tr = Tracker(c0.iAmWhite, c0.myTurnAtStart)
-        loadShapes(tr)
+        // 1.24: the 1.12 reading learns the shapes fresh each session (they are still saved, for the new reading)
         tr.autoColor = c0.autoColor
         tracker = tr
 
@@ -821,9 +821,7 @@ class ChessService : Service(), SideBarHost, SharedPreferences.OnSharedPreferenc
                                 continue
                             }
                             moving = true
-                            // on your turn the change is you touching or moving a piece: keep the arrows up while
-                            // you do (they are hidden for a moment when the board is read)
-                            if (!myTurnShown) hideMove()
+                            hideMove()
                         }
                         Thread.sleep(POLL)
                         continue
@@ -906,7 +904,7 @@ class ChessService : Service(), SideBarHost, SharedPreferences.OnSharedPreferenc
         if (overlayShown) {
             // our own drawing would be part of the picture
             hideMove()
-            Thread.sleep(100)
+            Thread.sleep(180)
             f = look() ?: return Tracker.Step.UNREADABLE
         }
         val reads = BoardVision.readSquares(f.px, f.w, f.local)
@@ -1837,7 +1835,7 @@ class ChessService : Service(), SideBarHost, SharedPreferences.OnSharedPreferenc
         const val CHECK_MS = 2500L          // how often the board check compares the squares with the last read
         const val QUICK_MS = 150            // the quick first look on your turn, drawn before the full think
         const val GUESS_MS = 180            // stockfish's search for the score and the bot's likely moves
-        private const val POLL = 80L // ms between looks at the screen
+        private const val POLL = 120L // ms between looks at the screen
     }
 
     override fun onDestroy() {
