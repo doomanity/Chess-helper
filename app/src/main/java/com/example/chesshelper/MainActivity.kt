@@ -47,9 +47,9 @@ class MainActivity : Activity() {
         root = col
 
         // ---- the hero: your last game's board, what the helper is doing, start / stop
-        root.addView(Hero.build(this, ui, c, ChessService.running, { start() }, {
+        root.addView(Hero.build(this, ui, c, ChessService.active, { start() }, {
             stopService(Intent(this, ChessService::class.java))
-            ChessService.running = false
+            ChessService.active = false
             toast("stopped")
             root.post { rebuild() }
         }), ui.full(top = 16f))
