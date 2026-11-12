@@ -97,6 +97,7 @@ class MainActivity : Activity() {
                 g.add(ui.sliderRow("aggression", 0, 100, 5, c.illusionAggression, { "$it" }) { v -> save { it.putInt("illusion_aggression", v) } })
                 g.add(ui.sliderRow("contempt", 0, 200, 5, c.illusionContempt, { if (it == 0) "takes draws" else "$it" }) { v -> save { it.putInt("illusion_contempt", v) } })
                 g.add(ui.sliderRow("swindle tolerance", 0, 300, 10, c.illusionTolerance, { if (it == 0) "no traps" else "$it" }) { v -> save { it.putInt("illusion_tolerance", v) } })
+                g.add(ui.sliderRow("brilliant hunt", 0, 100, 5, c.illusionHunt, { if (it == 0) "only mates" else "$it" }) { v -> save { it.putInt("illusion_hunt", v) } })
             }
         } else {
             maiaHostBox = EditText(this).apply { setText(c.maiaHost) }

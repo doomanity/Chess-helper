@@ -448,6 +448,7 @@ class ChessService : Service(), SideBarHost, SharedPreferences.OnSharedPreferenc
             it.aggression = c.illusionAggression
             it.contempt = c.illusionContempt
             it.tolerance = c.illusionTolerance
+            it.hunt = c.illusionHunt
             it.thinkMs = c.thinkMs
         }
         val ill = if (c.useIllusion) illusion else null
@@ -524,7 +525,7 @@ class ChessService : Service(), SideBarHost, SharedPreferences.OnSharedPreferenc
 
     /** what your answers depend on: a different engine, strength or style never reuses another's answer */
     private fun adviceSig(c: Cfg): String {
-        val style = if (c.useIllusion && c.illusionHuman) "|${c.illusionAggression},${c.illusionContempt},${c.illusionTolerance}" else ""
+        val style = if (c.useIllusion && c.illusionHuman) "|${c.illusionAggression},${c.illusionContempt},${c.illusionTolerance},${c.illusionHunt}" else ""
         return "$engineName|${c.nMoves}$style"
     }
 

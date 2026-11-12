@@ -459,6 +459,7 @@ class SideBar(private val ctx: Context, private val wm: WindowManager, private v
                 g.add(ui.sliderRow("aggression", 0, 100, 5, cfg.illusionAggression, { "$it" }) { v -> save { it.putInt("illusion_aggression", v) } })
                 g.add(ui.sliderRow("contempt", 0, 200, 5, cfg.illusionContempt, { if (it == 0) "takes draws" else "$it" }) { v -> save { it.putInt("illusion_contempt", v) } })
                 g.add(ui.sliderRow("swindle tolerance", 0, 300, 10, cfg.illusionTolerance, { if (it == 0) "no traps" else "$it" }) { v -> save { it.putInt("illusion_tolerance", v) } })
+                g.add(ui.sliderRow("brilliant hunt", 0, 100, 5, cfg.illusionHunt, { if (it == 0) "only mates" else "$it" }) { v -> save { it.putInt("illusion_hunt", v) } })
             }
         } else {
             g.add(ui.sliderRow("strength", UciEngine.MIN_ELO, UciEngine.MAX_ELO, 10, cfg.elo,

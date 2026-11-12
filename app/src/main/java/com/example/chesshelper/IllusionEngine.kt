@@ -21,6 +21,7 @@ class IllusionEngine(path: String) : MoveLister {
     private var sentAggression = -1
     private var sentContempt = -1
     private var sentTolerance = -1
+    private var sentHunt = -1
 
     /** human mode for its picks, and its personality settings */
     @Volatile var humanMode = false
@@ -28,6 +29,8 @@ class IllusionEngine(path: String) : MoveLister {
     @Volatile var aggression = 50
     @Volatile var contempt = 25
     @Volatile var tolerance = 60
+    /** how much a brilliant sacrifice may cost vs the best move (centipawns). a sac that mates always counts */
+    @Volatile var hunt = 30
 
     /** what the last search said about its move: a trap, a real sacrifice (its own "brilliant move !!") */
     @Volatile var lastFlaggedTrap = false
@@ -73,6 +76,7 @@ class IllusionEngine(path: String) : MoveLister {
             if (aggression != sentAggression) { send("setoption name Aggression value ${aggression.coerceIn(0, 100)}"); sentAggression = aggression }
             if (contempt != sentContempt) { send("setoption name Contempt value ${contempt.coerceIn(0, 200)}"); sentContempt = contempt }
             if (tolerance != sentTolerance) { send("setoption name SwindleTolerance value ${tolerance.coerceIn(0, 300)}"); sentTolerance = tolerance }
+            if (hunt != sentHunt) { send("setoption name BrilliantHunt value ${hunt.coerceIn(0, 100)}"); sentHunt = hunt }
         }
         if (human != sentHuman) {
             send("setoption name HumanMode value $human")

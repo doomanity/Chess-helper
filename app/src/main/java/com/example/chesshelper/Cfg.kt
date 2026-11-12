@@ -17,6 +17,7 @@ class Cfg(p: SharedPreferences) {
     val illusionHuman = p.getBoolean("illusion_human", true)      // illusion's human mode: attacks, trades, anti-draw, sacrifices, traps
     val illusionAggression = p.getInt("illusion_aggression", 50)  // 0..100: how much it attacks the king
     val illusionContempt = p.getInt("illusion_contempt", 25)      // 0..200: how much it avoids draws (centipawns)
+    val illusionHunt = p.getInt("illusion_hunt", 30)              // 0..100: how much a brilliant sacrifice may cost vs the best move (centipawns)
     val illusionTolerance = p.getInt("illusion_tolerance", 60)    // 0..300: the most a trap may cost vs the best move
     val illusionBrilliant = p.getBoolean("illusion_brilliant", true) // illusion hunts brilliant moves on your turn
     val illusionGuess = p.getBoolean("illusion_guess", true)      // illusion guesses the bot's move when maia3 is off
