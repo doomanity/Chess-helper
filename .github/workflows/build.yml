@@ -133,3 +133,10 @@ jobs:
         with:
           name: ChessHelper-windows
           path: ChessHelper-windows.zip
+      - name: publish to the repo's releases (next to the apk)
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "pc-${{ github.run_number }}" ChessHelper-windows.zip -R "${{ github.repository }}" \
+            --title "chess helper for pc (build ${{ github.run_number }})" --notes "unzip, then run ChessHelper/ChessHelper.exe" --prerelease
