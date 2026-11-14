@@ -101,9 +101,9 @@ jobs:
           names=$(gh release view -R official-stockfish/Stockfish --json assets -q '.assets[].name')
           echo "$names"
           # newer releases have one universal build (it picks the cpu's features itself), older ones avx2 + sse41
-          fast=$(echo "$names" | grep -i windows | grep -i 'x86-64-avx2' | head -1)
-          [ -z "$fast" ] && fast=$(echo "$names" | grep -i windows | grep -i 'x86-64' | head -1)
-          compat=$(echo "$names" | grep -i windows | grep -iE 'x86-64-sse41' | head -1)
+          fast=$(echo "$names" | grep -i windows | grep -i 'x86-64-avx2' | head -1 || true)
+          [ -z "$fast" ] && fast=$(echo "$names" | grep -i windows | grep -i 'x86-64' | head -1 || true)
+          compat=$(echo "$names" | grep -i windows | grep -iE 'x86-64-sse41' | head -1 || true)
           echo "fast: $fast  compatible: $compat"
           gh release download -R official-stockfish/Stockfish --pattern "$fast" -D sf
           (cd sf && 7z x -y "$fast" > /dev/null; true)
