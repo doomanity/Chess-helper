@@ -97,10 +97,23 @@ jobs:
         run: |
           mkdir -p engines
           # stockfish: the fast build, and a compatible one for older cpus (the app starts the first that runs)
-          gh release download -R official-stockfish/Stockfish --pattern "stockfish-windows-x86-64-avx2.zip" -D sf
-          gh release download -R official-stockfish/Stockfish --pattern "stockfish-windows-x86-64-sse41-popcnt.zip" -D sf2
-          (cd sf && 7z x -y *.zip > /dev/null) && cp "$(find sf -name '*.exe' | head -1)" engines/stockfish.exe
-          (cd sf2 && 7z x -y *.zip > /dev/null) && cp "$(find sf2 -name '*.exe' | head -1)" engines/stockfish-compat.exe
+          # the release's file names change between versions: list them and pick the windows builds by pattern
+          names=$(gh release view -R official-stockfish/Stockfish --json assets -q '.assets[].name')
+          echo "$names"
+          fast=$(echo "$names" | grep -i windows | grep -i 'x86-64-avx2' | head -1)
+          compat=$(echo "$names" | grep -i windows | grep -iE 'sse41|x86-64\.|x86-64-modern' | head -1)
+          [ -z "$compat" ] && compat=$(echo "$names" | grep -i windows | grep -iv 'avx\|bmi\|vnni' | head -1)
+          echo "fast: $fast  compatible: $compat"
+          gh release download -R official-stockfish/Stockfish --pattern "$fast" -D sf
+          (cd sf && 7z x -y "$fast" > /dev/null; true)
+          (cd sf && for t in *.tar; do [ -f "$t" ] && 7z x -y "$t" > /dev/null; done; true)
+          cp "$(find sf -iname '*.exe' | head -1)" engines/stockfish.exe
+          if [ -n "$compat" ]; then
+            gh release download -R official-stockfish/Stockfish --pattern "$compat" -D sf2
+            (cd sf2 && 7z x -y "$compat" > /dev/null; true)
+            (cd sf2 && for t in *.tar; do [ -f "$t" ] && 7z x -y "$t" > /dev/null; done; true)
+            cp "$(find sf2 -iname '*.exe' | head -1)" engines/stockfish-compat.exe || true
+          fi
           # brody's own engine, latest main
           git clone --depth 1 https://github.com/doomanity/Illusion.git
           (cd Illusion/engine && cargo build --release --bin illusion) && cp Illusion/engine/target/release/illusion.exe engines/
