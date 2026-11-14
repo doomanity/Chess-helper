@@ -75,3 +75,47 @@ jobs:
           gh release delete latest --yes --cleanup-tag || true
           gh release create latest app/build/outputs/apk/debug/app-debug.apk \
             --title "latest build" --notes "newest apk, built from the last push"
+
+  # the pc app (windows): the same board reader and move follower, a see-through overlay, engines included
+  desktop:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.14.3'
+      - name: build the pc app
+        run: gradle -p desktop installDist --no-daemon
+      - name: engines (stockfish, illusion)
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p engines
+          # stockfish: the fast build, and a compatible one for older cpus (the app starts the first that runs)
+          gh release download -R official-stockfish/Stockfish --pattern "stockfish-windows-x86-64-avx2.zip" -D sf
+          gh release download -R official-stockfish/Stockfish --pattern "stockfish-windows-x86-64-sse41-popcnt.zip" -D sf2
+          (cd sf && 7z x -y *.zip > /dev/null) && cp "$(find sf -name '*.exe' | head -1)" engines/stockfish.exe
+          (cd sf2 && 7z x -y *.zip > /dev/null) && cp "$(find sf2 -name '*.exe' | head -1)" engines/stockfish-compat.exe
+          # brody's own engine, latest main
+          git clone --depth 1 https://github.com/doomanity/Illusion.git
+          (cd Illusion/engine && cargo build --release --bin illusion) && cp Illusion/engine/target/release/illusion.exe engines/
+          ls -la engines
+      - name: package (java included, no install needed)
+        shell: bash
+        run: |
+          jpackage --type app-image --name ChessHelper --app-version 1.0.${{ github.run_number }} \
+            --input desktop/build/install/chess-helper-pc/lib --main-jar chess-helper-pc.jar \
+            --main-class com.example.chesshelper.pc.MainKt --java-options "-Dsun.java2d.uiScale=1" --dest out
+          mkdir -p out/ChessHelper/app/engines
+          cp engines/* out/ChessHelper/app/engines/
+          (cd out && 7z a -tzip ../ChessHelper-windows.zip ChessHelper > /dev/null)
+          ls -la ChessHelper-windows.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ChessHelper-windows
+          path: ChessHelper-windows.zip

@@ -125,3 +125,17 @@ open the failed run in the Actions tab, copy the red error text and send it to c
 selftest/SelfTest.kt checks the board reading and game following on a real screenshot and on simulated games (both sides, flipped board, castling, en passant, promotion, mid-game start). it runs on a computer, not in the app.
 
 selftest/ReviewTest.kt checks the move labels (brilliant, great, miss, the thresholds, the opening hash, pgn text reading) with made-up engine numbers. it needs no phone, no engine and no chess library: compile it with app/src/main/java/com/example/chesshelper/{Review,Accuracy,Candidates,HaikuParse}.kt and run `ReviewTest`.
+
+
+## the pc app (windows)
+
+desktop/ holds the pc version. it reads the board on your screen with the same board reader and move follower as the phone app (any site: chess.com, lichess and others), and draws on a see-through window over the real board: clicks go through to the game, and screen capture skips it (windows 10 2004 or newer), so it never reads its own arrows.
+
+- instant: stockfish thinks nonstop and every deeper answer updates the arrows at once (the first suggestion comes within milliseconds of the position appearing, then they sharpen)
+- your turn: your best moves (1-4) graded by color, the card beside the board, the eval bar
+- the bot's turn: its 3 likely moves (dashed, with odds when maia3 guesses) and your premove answer to each (same color and number)
+- illusion: its pick first ("*", "trap", or a blue "!!" for a real sacrifice). in human mode it thinks on a short clock (traps and sacrifices need one) while stockfish's arrows show at once
+- maia3: run tools/maia3_server.py on the pc and pick "guess with: maia3"
+- the piece shapes are learned at a game's start position and saved in %APPDATA%\ChessHelper, like the settings
+
+get it: the "ChessHelper-windows" download of the latest github actions run. unzip, run ChessHelper\ChessHelper.exe (java, stockfish and illusion are included).
