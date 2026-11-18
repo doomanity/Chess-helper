@@ -28,6 +28,16 @@ object Win32 {
     private const val WS_EX_TOPMOST = 0x8
     private const val WDA_EXCLUDEFROMCAPTURE = 0x11
 
+    /** screen capture skips this window (the settings window over the board must not be read as part of it) */
+    fun hideFromCapture(w: Window): Boolean {
+        if (!Platform.isWindows()) return false
+        return try {
+            ex?.SetWindowDisplayAffinity(WinDef.HWND(Native.getComponentPointer(w)), WDA_EXCLUDEFROMCAPTURE) == true
+        } catch (_: Throwable) {
+            false
+        }
+    }
+
     /**
      * makes the window a pass-through overlay: mouse clicks go to the game under it, it never takes focus and has
      * no taskbar button. returns true when screen capture skips it too (windows 10 2004 and newer), so reading

@@ -98,6 +98,8 @@ class ControlWindow(private val st: Settings, private val onChange: () -> Unit) 
         frame.size = Dimension(380, 720)
         frame.isAlwaysOnTop = false
         frame.isVisible = true
+        // the board reader never sees this window, even when it sits over the board
+        Win32.hideFromCapture(frame)
     }
 
     fun status(text: String) = SwingUtilities.invokeLater { statusLabel.text = text }

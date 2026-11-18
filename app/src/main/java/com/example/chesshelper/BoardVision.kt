@@ -90,20 +90,82 @@ object BoardVision {
                 }
             }
         }
+        if (best != null) return best
+        // boards whose squares shade across the board (brushed metal, glossy, gradient themes): the squares are
+        // no single color, but light ones stay lighter than dark ones. same search by brightness
+        for (i in top.indices) {
+            for (j in i + 1 until top.size) {
+                if (abs(luma(top[i]) - luma(top[j])) < 40) continue
+                val g = candidate(px, w, h, top[i], top[j], byLight = true) ?: continue
+                val an = analyzeLight(px, w, h, g) ?: continue
+                val need = if (g.size >= w * 0.6) 0.72 else 0.85
+                if (an.score >= need && an.score * g.size > bestScore) {
+                    bestScore = an.score * g.size
+                    best = g
+                }
+            }
+        }
         return best
     }
 
-    /** the biggest square-ish area made only of these two colors */
-    fun candidate(px: IntArray, w: Int, h: Int, c1: Int, c2: Int): BoardGeom? {
+    /**
+     * the light / dark version of analyze: each square's edge brightness, split into a light and a dark group
+     * (two means). a board when the groups are far apart and alternate like a chessboard
+     */
+    private fun analyzeLight(px: IntArray, w: Int, h: Int, g: BoardGeom): Analysis? {
+        if (g.left < 0 || g.top < 0 || g.left + g.size > w || g.top + g.size > h || g.size < 160) return null
+        val cols = IntArray(64)
+        for (r in 0..7) for (c in 0..7) cols[r * 8 + c] = edgeColor(px, w, g, r, c)
+        val lum = IntArray(64) { luma(cols[it]) }
+        var lo = lum.minOrNull()!!.toDouble()
+        var hi = lum.maxOrNull()!!.toDouble()
+        repeat(8) {
+            val mid = (lo + hi) / 2
+            val l = lum.filter { it < mid }
+            val d = lum.filter { it >= mid }
+            if (l.isEmpty() || d.isEmpty()) return null
+            lo = l.average()
+            hi = d.average()
+        }
+        if (hi - lo < 40) return null
+        val mid = (lo + hi) / 2
+        var m0 = 0
+        var m1 = 0
+        for (r in 0..7) for (c in 0..7) {
+            val light = if (lum[r * 8 + c] >= mid) 0 else 1
+            // a square that sits in neither group's range doesn't count
+            val v = lum[r * 8 + c]
+            if (abs(v - (if (light == 0) hi else lo)) > (hi - lo) * 0.45) continue
+            if (light == (r + c) % 2) m0++
+            if (light == (r + c + 1) % 2) m1++
+        }
+        val lightCols = cols.filterIndexed { i, _ -> lum[i] >= mid }
+        val darkCols = cols.filterIndexed { i, _ -> lum[i] < mid }
+        return Analysis(maxOf(m0, m1) / 64.0, avgColor(lightCols), avgColor(darkCols))
+    }
+
+    private fun avgColor(cs: List<Int>): Int {
+        if (cs.isEmpty()) return 0
+        return rgb(cs.sumOf { red(it) } / cs.size, cs.sumOf { green(it) } / cs.size, cs.sumOf { blue(it) } / cs.size)
+    }
+
+    /** the biggest square-ish area made only of these two colors (or, byLight, of these two brightnesses) */
+    fun candidate(px: IntArray, w: Int, h: Int, c1: Int, c2: Int, byLight: Boolean = false): BoardGeom? {
         val tol = 40
+        val l1 = luma(c1)
+        val l2 = luma(c2)
+        fun match(p: Int): Boolean = if (byLight) {
+            val l = luma(p)
+            // greyish shades near either brightness (a gradient square drifts in brightness, not in hue)
+            (abs(l - l1) <= 34 || abs(l - l2) <= 34) && maxOf(red(p), green(p), blue(p)) - minOf(red(p), green(p), blue(p)) <= 60
+        } else dist(p, c1) <= tol || dist(p, c2) <= tol
         val rowOk = BooleanArray(h)
         var y = 0
         while (y < h) {
             var cnt = 0
             var x = 0
             while (x < w) {
-                val p = px[y * w + x]
-                if (dist(p, c1) <= tol || dist(p, c2) <= tol) cnt++
+                if (match(px[y * w + x])) cnt++
                 x += 2
             }
             val ok = cnt * 2 >= w * 0.10
@@ -119,8 +181,7 @@ object BoardVision {
             var cnt = 0
             var yy = y0
             while (yy <= y1) {
-                val p = px[yy * w + x]
-                if (dist(p, c1) <= tol || dist(p, c2) <= tol) cnt++
+                if (match(px[yy * w + x])) cnt++
                 yy += 2
             }
             colOk[x] = cnt * 2 >= (y1 - y0 + 1) * 0.10
@@ -217,7 +278,8 @@ object BoardVision {
     }
 
     /** 0..1: how much this looks like a real chessboard (squares alternate between two colors) */
-    fun scoreGeom(px: IntArray, w: Int, h: Int, g: BoardGeom): Double = analyze(px, w, h, g)?.score ?: 0.0
+    fun scoreGeom(px: IntArray, w: Int, h: Int, g: BoardGeom): Double =
+        maxOf(analyze(px, w, h, g)?.score ?: 0.0, analyzeLight(px, w, h, g)?.score ?: 0.0)
 
     // ------------------------------------------------------------------ reading the squares
 
