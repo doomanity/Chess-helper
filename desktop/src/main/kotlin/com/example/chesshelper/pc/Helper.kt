@@ -24,7 +24,12 @@ import java.util.concurrent.atomic.AtomicInteger
  * and move follower), and keep the engines thinking about the position on screen. your turn: your best moves
  * stream in live. the bot's turn: its likely moves stream in, then your premove answer to each
  */
-class Helper(private val st: Settings, private val overlay: Overlay, private val status: (String) -> Unit) {
+class Helper(private val st: Settings, private val overlay: Overlay, private val report: (String) -> Unit) {
+    private fun status(t: String) {
+        lastStatus = t
+        report(t)
+    }
+
     private val robot = Robot()
     private val screen: Rectangle = GraphicsEnvironment.getLocalGraphicsEnvironment().defaultScreenDevice.defaultConfiguration.bounds
     private val engineDir: File = appDir()
@@ -43,6 +48,40 @@ class Helper(private val st: Settings, private val overlay: Overlay, private val
     private var lastFen: String? = null
     private var savedShapes = -1
     private val gen = AtomicInteger()
+    @Volatile private var lastFrame: Triple<IntArray, Int, Int>? = null
+    @Volatile private var lastStatus = ""
+    private var lostSince = 0L
+    private var savedLost = false
+
+    /**
+     * saves the last screen picture the helper took, with what it found and read, in %APPDATA%\ChessHelper\debug
+     * (to check what went wrong). returns the folder
+     */
+    fun saveDebug(why: String): File? {
+        val (px, w, h) = lastFrame ?: return null
+        return try {
+            val dir = File(Store.dir, "debug").also { it.mkdirs() }
+            val stamp = java.text.SimpleDateFormat("yyyyMMdd-HHmmss").format(java.util.Date())
+            val img = java.awt.image.BufferedImage(w, h, java.awt.image.BufferedImage.TYPE_INT_RGB)
+            img.setRGB(0, 0, w, h, px, 0, w)
+            javax.imageio.ImageIO.write(img, "png", File(dir, "screen-$stamp.png"))
+            val g = geom ?: lastGeom
+            val score = g?.let { BoardVision.scoreGeom(px, w, h, it) }
+            val info = buildString {
+                appendLine("why: $why")
+                appendLine("status: $lastStatus")
+                appendLine("screen: ${w}x$h  board: $g  score there: $score  last board: $lastGeom")
+                appendLine("found fresh: ${BoardVision.findBoard(px, w, h, null)}")
+                appendLine("position: ${tracker.board?.fen}")
+                appendLine("moves: ${tracker.playedMoves.takeLast(12)}")
+                appendLine("shapes: ${tracker.templates.known}/12  overlay hidden from capture: ${overlay.hiddenFromCapture}")
+            }
+            File(dir, "screen-$stamp.txt").writeText(info)
+            dir
+        } catch (_: Exception) {
+            null
+        }
+    }
 
     // engines: stockfish thinking live, stockfish for quick premove answers, illusion (optional)
     private var sf: LiveEngine? = null
@@ -142,13 +181,27 @@ class Helper(private val st: Settings, private val overlay: Overlay, private val
 
     private fun tick() {
         val (px, w, h) = grab()
-        val g = findBoard(px, w, h)
+        lastFrame = Triple(px.copyOf(), w, h)
+        var g = findBoard(px, w, h)
+        val now0 = System.currentTimeMillis()
         if (g == null) {
-            status("looking for the chess board...")
-            overlay.clear()
-            lastFen = null
-            Thread.sleep(300)
-            return
+            if (lostSince == 0L) lostSince = now0
+            // a moment without the board (a highlight, a dragged piece, a popup): keep the last one for 1.5 s
+            val keep = lastGeom
+            if (keep != null && now0 - lostSince < 1500) {
+                g = keep
+            } else {
+                status("looking for the chess board...")
+                // save what it saw once, so it can be checked (one picture per lost board)
+                if (!savedLost) { savedLost = true; saveDebug("lost the board") }
+                overlay.clear()
+                lastFen = null
+                Thread.sleep(300)
+                return
+            }
+        } else {
+            lostSince = 0L
+            savedLost = false
         }
         // read once the board holds still (a move animation, a dragged piece)
         val thumb = BoardVision.thumb(px, w, h, g)
@@ -183,8 +236,12 @@ class Helper(private val st: Settings, private val overlay: Overlay, private val
 
     private fun findBoard(px: IntArray, w: Int, h: Int): BoardGeom? {
         geom?.let { if (BoardVision.scoreGeom(px, w, h, it) >= 0.6) return it }
-        val fresh = BoardVision.findBoard(px, w, h, null)
+        var fresh = BoardVision.findBoard(px, w, h, null)
         if (fresh != null) {
+            // found again a pixel or two off: the same board (a new spot each frame would look like constant motion)
+            val prev = lastGeom
+            if (prev != null && kotlin.math.abs(prev.left - fresh.left) <= 4 && kotlin.math.abs(prev.top - fresh.top) <= 4 &&
+                kotlin.math.abs(prev.size - fresh.size) <= 6) fresh = prev
             geom = fresh
             lastGeom = fresh
             return fresh

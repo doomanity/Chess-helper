@@ -31,6 +31,13 @@ fun main() {
         if (helper.paused) win.status("paused")
     }
     win.newGameButton.addActionListener { helper.newGame() }
+    win.debugButton.addActionListener {
+        val dir = helper.saveDebug("saved by hand")
+        if (dir != null) {
+            win.status("saved in ${dir.path}")
+            try { java.awt.Desktop.getDesktop().open(dir) } catch (_: Exception) {}
+        }
+    }
     Runtime.getRuntime().addShutdownHook(Thread { helper.stop() })
     helper.start()
 }

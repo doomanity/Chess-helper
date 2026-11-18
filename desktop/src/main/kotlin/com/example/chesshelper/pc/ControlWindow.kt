@@ -29,6 +29,7 @@ class ControlWindow(private val st: Settings, private val onChange: () -> Unit) 
     private val statusLabel = JLabel("starting...")
     val pauseButton = JButton("pause")
     val newGameButton = JButton("new game")
+    val debugButton = JButton("save what it sees")
 
     private val felt = Color(0x0F2E25)
     private val cell = Color(0x173F33)
@@ -61,6 +62,10 @@ class ControlWindow(private val st: Settings, private val onChange: () -> Unit) 
             buttons.add(b)
         }
         root.add(left(buttons))
+        root.add(Box.createVerticalStrut(6))
+        debugButton.foreground = ivory
+        debugButton.isFocusPainted = false
+        root.add(left(debugButton))
 
         // ---- game
         val game = section(root, "Game")
