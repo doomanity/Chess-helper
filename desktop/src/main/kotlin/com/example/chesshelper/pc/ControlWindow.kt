@@ -30,6 +30,8 @@ class ControlWindow(private val st: Settings, private val onChange: () -> Unit) 
     val pauseButton = JButton("pause")
     val newGameButton = JButton("new game")
     val debugButton = JButton("save what it sees")
+    val hintButton = JButton("hint (F2)")
+    val reviewButton = JButton("review game")
 
     private val felt = Color(0x0F2E25)
     private val cell = Color(0x173F33)
@@ -63,6 +65,16 @@ class ControlWindow(private val st: Settings, private val onChange: () -> Unit) 
         }
         root.add(left(buttons))
         root.add(Box.createVerticalStrut(6))
+        val buttons2 = JPanel(GridLayout(1, 2, 8, 0))
+        buttons2.isOpaque = false
+        for (b in listOf(hintButton, reviewButton)) {
+            b.foreground = ivory
+            b.font = Font("SansSerif", Font.BOLD, 13)
+            b.isFocusPainted = false
+            buttons2.add(b)
+        }
+        root.add(left(buttons2))
+        root.add(Box.createVerticalStrut(6))
         debugButton.foreground = ivory
         debugButton.isFocusPainted = false
         root.add(left(debugButton))
@@ -72,6 +84,7 @@ class ControlWindow(private val st: Settings, private val onChange: () -> Unit) 
         game.add(row("i play", combo(listOf("auto", "white", "black"), st.colorMode) { st.colorMode = it }))
         game.add(row("engine", combo(listOf("stockfish", "illusion"), st.engine) { st.engine = it }))
         game.add(row("moves shown", combo(listOf("1", "2", "3", "4"), "${st.lines}") { st.lines = it.toInt() }))
+        game.add(row("hide arrows (hint only)", check(st.hideArrows) { st.hideArrows = it }))
 
         // ---- illusion
         val il = section(root, "Illusion")
@@ -106,6 +119,15 @@ class ControlWindow(private val st: Settings, private val onChange: () -> Unit) 
         // the board reader never sees this window, even when it sits over the board
         Win32.hideFromCapture(frame)
     }
+
+    /** the review button lights up (brass) when a finished game is waiting for its review */
+    fun reviewReady(ready: Boolean) = SwingUtilities.invokeLater {
+        reviewButton.background = if (ready) brass else null
+        reviewButton.foreground = if (ready) Color(0x16261F) else ivory
+        reviewButton.text = if (ready) "review last game" else "review game"
+    }
+
+    val window: JFrame get() = frame
 
     fun status(text: String) = SwingUtilities.invokeLater { statusLabel.text = text }
 

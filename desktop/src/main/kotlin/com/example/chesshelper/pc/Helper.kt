@@ -100,6 +100,57 @@ class Helper(
     @Volatile private var guesses: List<Pair<String, Float?>> = emptyList()
     @Volatile private var answers: Map<String, String> = emptyMap()
 
+    // the position on screen right now (for redrawing when a hint starts or ends)
+    private class Ctx(val b: Board, val g: BoardGeom, val wb: Boolean, val my: Int, val myTurn: Boolean)
+    @Volatile private var ctx: Ctx? = null
+    // hint: the best moves show until this time, even with the arrows hidden
+    @Volatile private var hintUntil = 0L
+    // hint asked for on the bot's turn: it shows as soon as it's your turn
+    @Volatile private var hintPending = false
+
+    /** a finished game (or the one on screen) for the review: called when a game ends on the board or a new one starts */
+    var onGameOver: ((GameRecord, Boolean) -> Unit)? = null
+    private var reviewedKey = ""
+    @Volatile var stockfishPath: String? = null
+        private set
+
+    /** the game on screen so far (null before 2 moves) */
+    fun currentGame(): GameRecord? {
+        val moves = ArrayList(tracker.playedMoves)
+        if (moves.size < 2 || tracker.startFen.isEmpty()) return null
+        return GameRecord(tracker.startFen, moves, tracker.meWhite())
+    }
+
+    /** the hint: your best moves for 10 seconds (on the bot's turn, as soon as it's your turn) */
+    fun hint() {
+        val c = ctx
+        if (c == null) {
+            status("no position yet: the hint works once the board is read")
+            return
+        }
+        if (!c.myTurn) {
+            hintPending = true
+            status("hint ready for your turn")
+            return
+        }
+        startHint(c)
+    }
+
+    private fun hintOn() = System.currentTimeMillis() < hintUntil
+
+    private fun startHint(c: Ctx) {
+        hintPending = false
+        hintUntil = System.currentTimeMillis() + HINT_MS
+        showMine(c.b, c.g, c.wb, c.my)
+        // the countdown on the card, then the arrows go away again
+        Thread {
+            while (gen.get() == c.my && hintOn()) {
+                Thread.sleep(1000)
+                if (gen.get() == c.my) showMine(c.b, c.g, c.wb, c.my)
+            }
+        }.apply { isDaemon = true; start() }
+    }
+
     fun start() {
         Thread({ run() }, "chess helper").apply { isDaemon = true; start() }
     }
@@ -132,6 +183,7 @@ class Helper(
             it.option("Hash", 256)
         }
         val used = sfPaths.firstOrNull { File(it).exists() && sf != null }
+        stockfishPath = used
         answer = try { used?.let { UciEngine(it) } } catch (_: Exception) { null }
         if (sf == null) status("stockfish didn't start: engines folder missing next to the app")
     }
@@ -270,8 +322,19 @@ class Helper(
             status("can't tell the pieces apart on this board")
             return
         }
+        // the game so far, in case this read starts a new one (then the old one is ready for its review)
+        val prevStart = tracker.startFen
+        val prevMoves = ArrayList(tracker.playedMoves)
+        val prevWhite = tracker.meWhite()
         val step = tracker.update(cls, reads, now)
         lastStep = step
+        if (step == Tracker.Step.STARTED && prevMoves.size >= 4 && prevStart.isNotEmpty()) {
+            val key = "$prevStart ${prevMoves.joinToString(" ")}"
+            if (key != reviewedKey) {
+                reviewedKey = key
+                gameOver(GameRecord(prevStart, prevMoves, prevWhite), false)
+            }
+        }
         if (tracker.templates.version != savedShapes) {
             savedShapes = tracker.templates.version
             try { Store.shapes.writeText(tracker.templates.encode()) } catch (_: Exception) {}
@@ -296,8 +359,22 @@ class Helper(
         if (b.fen != lastFen) {
             lastFen = b.fen
             onPosition(Board().apply { loadFromFen(b.fen) }, g, tracker.whiteBottom ?: true)
+            // checkmate, stalemate or a dead draw on the board: the game is over, open its review
+            val over = try { b.isMated || b.isStaleMate || b.isInsufficientMaterial } catch (_: Exception) { false }
+            if (over) currentGame()?.let { rec ->
+                val key = "${rec.startFen} ${rec.moves.joinToString(" ")}"
+                if (key != reviewedKey) {
+                    reviewedKey = key
+                    gameOver(rec, true)
+                }
+            }
         }
         status("${step.name.lowercase().replace('_', ' ')} · shapes ${tracker.templates.known}/12 · ${engineLabel()}")
+    }
+
+    private fun gameOver(rec: GameRecord, ended: Boolean) {
+        try { rec.savePgn() } catch (_: Exception) {}
+        onGameOver?.invoke(rec, ended)
     }
 
     private fun engineLabel() = if (st.engine == "illusion") "illusion" + (if (st.humanMode) " · human vs ${st.oppElo}" else "") else "stockfish"
@@ -315,10 +392,15 @@ class Helper(
         guesses = emptyList()
         answers = emptyMap()
         ill?.stop()
-        overlay.update(View(g, wb, title = if (myTurn) "thinking..." else "bot's turn"))
+        ctx = Ctx(b, g, wb, my, myTurn)
+        // a new position ends the hint (you moved, or the bot did)
+        hintUntil = 0L
+        overlay.update(View(g, wb, title = if (st.hideArrows) hiddenTitle(myTurn) else if (myTurn) "thinking..." else "bot's turn"))
         val engine = sf ?: return
+        if (myTurn && hintPending) startHint(ctx!!)
         if (myTurn) {
-            engine.analyze(fen, st.lines) { snap ->
+            // with the arrows hidden the hint shows a few moves, so stockfish keeps at least 3 lines
+            engine.analyze(fen, if (st.hideArrows) maxOf(st.lines, 3) else st.lines) { snap ->
                 if (gen.get() != my) return@analyze
                 sfSnap = snap
                 showMine(b, g, wb, my)
@@ -403,7 +485,16 @@ class Helper(
         }.apply { isDaemon = true; start() }
     }
 
+    private fun hiddenTitle(myTurn: Boolean) =
+        if (myTurn) (if (hintPending) "hint coming..." else "arrows hidden · F2 for a hint") else "bot's turn · arrows hidden"
+
     private fun showMine(b: Board, g: BoardGeom, wb: Boolean, my: Int) {
+        val hint = hintOn()
+        if (st.hideArrows && !hint) {
+            if (gen.get() == my) overlay.update(View(g, wb, title = hiddenTitle(true)))
+            return
+        }
+        val shown = if (hint && st.hideArrows) maxOf(st.lines, 3) else st.lines
         val snap = sfSnap
         val fen = b.fen
         val lines: List<Line> = snap?.lines ?: emptyList()
@@ -419,7 +510,7 @@ class Helper(
                 tag = if (illBrilliant) "" else if (illTrap) " trap" else " *", brilliant = illBrilliant && grade != Grade.BLUNDER))
         }
         for (l in lines) {
-            if (arrows.size >= st.lines) break
+            if (arrows.size >= shown) break
             if (l.move == pick) continue
             val grade = if (best != null) Grade.of(best - l.score) else Grade.BEST
             arrows.add(MoveArrow(l.move.substring(0, 2), l.move.substring(2, 4), grade, arrows.size + 1,
@@ -427,7 +518,9 @@ class Helper(
         }
         if (gen.get() != my) return
         val (share, text) = evalOf(b, lines.firstOrNull())
-        val title = (if (st.engine == "illusion") "illusion" else "stockfish") + (snap?.let { " · depth ${it.depth}" } ?: "")
+        val left = ((hintUntil - System.currentTimeMillis() + 999) / 1000).coerceAtLeast(0)
+        val title = (if (hint) "hint · ${left}s · " else "") +
+            (if (st.engine == "illusion") "illusion" else "stockfish") + (snap?.let { " · depth ${it.depth}" } ?: "")
         overlay.update(View(g, wb, mine = arrows, title = title, evalShare = share, evalText = text))
     }
 
@@ -444,6 +537,10 @@ class Helper(
                 a?.substring(0, 2), a?.substring(2, 4), if (a != null && after != null) Game.san(after, a) else null)
         }
         if (gen.get() != my) return
+        if (st.hideArrows) {
+            overlay.update(View(g, wb, title = hiddenTitle(false)))
+            return
+        }
         val (share, text) = evalOf(b, sfSnap?.lines?.firstOrNull())
         overlay.update(View(g, wb, guesses = list, title = "bot's turn", evalShare = share, evalText = text))
     }
@@ -461,6 +558,8 @@ class Helper(
     }
 
     companion object {
+        const val HINT_MS = 10_000L
+
         /** the folder the app runs from (the engines folder sits next to the app's files) */
         fun appDir(): File {
             System.getProperty("chesshelper.dir")?.let { return File(it) }

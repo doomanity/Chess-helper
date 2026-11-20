@@ -12,6 +12,7 @@ import java.awt.Window
 object Win32 {
     private interface User32Ex : StdCallLibrary {
         fun SetWindowDisplayAffinity(hWnd: WinDef.HWND, affinity: Int): Boolean
+        fun GetAsyncKeyState(vKey: Int): Short
     }
 
     private val ex: User32Ex? = try {
@@ -56,4 +57,13 @@ object Win32 {
             false
         }
     }
+
+    /** whether a key is held down right now, whatever window has focus (for the F2 hint key) */
+    fun keyDown(vk: Int): Boolean = try {
+        (ex?.GetAsyncKeyState(vk)?.toInt() ?: 0) and 0x8000 != 0
+    } catch (_: Throwable) {
+        false
+    }
+
+    const val VK_F2 = 0x71
 }

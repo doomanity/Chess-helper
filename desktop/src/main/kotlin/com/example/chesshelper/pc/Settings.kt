@@ -7,6 +7,7 @@ import java.util.Properties
 object Store {
     val dir: File = File(System.getenv("APPDATA") ?: System.getProperty("user.home"), "ChessHelper").also { it.mkdirs() }
     val shapes = File(dir, "piece_shapes.txt")
+    val games = File(dir, "games")
 }
 
 /** the pc app's settings, saved as they change */
@@ -25,6 +26,7 @@ class Settings {
     var tolerance = 60
     var hunt = 30
     var illusionMs = 400            // illusion's think for its pick in human mode (it needs a clock for traps)
+    var hideArrows = false          // no arrows until you ask for a hint (F2 or the hint button)
 
     private val file = File(Store.dir, "settings.properties")
 
@@ -46,6 +48,7 @@ class Settings {
         tolerance = p.getProperty("tolerance")?.toIntOrNull() ?: tolerance
         hunt = p.getProperty("hunt")?.toIntOrNull() ?: hunt
         illusionMs = p.getProperty("illusionMs")?.toIntOrNull() ?: illusionMs
+        hideArrows = p.getProperty("hideArrows")?.toBoolean() ?: hideArrows
     }
 
     fun save() {
@@ -54,6 +57,7 @@ class Settings {
         p["guessWith"] = guessWith; p["maiaHost"] = maiaHost; p["botElo"] = "$botElo"; p["humanMode"] = "$humanMode"
         p["oppElo"] = "$oppElo"; p["aggression"] = "$aggression"; p["contempt"] = "$contempt"
         p["tolerance"] = "$tolerance"; p["hunt"] = "$hunt"; p["illusionMs"] = "$illusionMs"
+        p["hideArrows"] = "$hideArrows"
         try { file.outputStream().use { p.store(it, "chess helper") } } catch (_: Exception) {}
     }
 }
