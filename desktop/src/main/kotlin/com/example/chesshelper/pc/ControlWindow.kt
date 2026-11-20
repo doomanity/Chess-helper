@@ -85,6 +85,7 @@ class ControlWindow(private val st: Settings, private val onChange: () -> Unit) 
         game.add(row("engine", combo(listOf("stockfish", "illusion"), st.engine) { st.engine = it }))
         game.add(row("moves shown", combo(listOf("1", "2", "3", "4"), "${st.lines}") { st.lines = it.toInt() }))
         game.add(row("hide arrows (hint only)", check(st.hideArrows) { st.hideArrows = it }))
+        game.add(row("always show brilliant moves", check(st.alwaysBrilliant) { st.alwaysBrilliant = it }))
 
         // ---- illusion
         val il = section(root, "Illusion")

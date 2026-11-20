@@ -162,7 +162,7 @@ class Helper(
 
     /** settings changed: think again about the position on screen */
     fun settingsChanged() {
-        if (st.engine != "illusion") { ill?.stop() }
+        if (st.engine != "illusion" && !st.alwaysBrilliant) { ill?.stop() }
         tracker.iAmWhite = st.colorMode != "black"
         tracker.autoColor = st.colorMode == "auto"
         lastFen = null
@@ -405,8 +405,9 @@ class Helper(
                 sfSnap = snap
                 showMine(b, g, wb, my)
             }
-            if (st.engine == "illusion") illusion()?.let { e ->
-                if (st.humanMode) {
+            // illusion runs for your arrows, or just to spot brilliant moves ("always show brilliant moves")
+            if (st.engine == "illusion" || st.alwaysBrilliant) illusion()?.let { e ->
+                if (st.humanMode || st.engine != "illusion") {
                     e.option("HumanMode", true)
                     e.option("OpponentElo", st.oppElo.coerceIn(400, 2800))
                     e.option("Aggression", st.aggression.coerceIn(0, 100))
@@ -490,8 +491,14 @@ class Helper(
 
     private fun showMine(b: Board, g: BoardGeom, wb: Boolean, my: Int) {
         val hint = hintOn()
+        val pick = illPick
+        val brilliantPick = st.alwaysBrilliant && illBrilliant && pick != null && pick.length >= 4
         if (st.hideArrows && !hint) {
-            if (gen.get() == my) overlay.update(View(g, wb, title = hiddenTitle(true)))
+            if (gen.get() != my) return
+            // arrows hidden, but a brilliant move still shows (its blue "!!" arrow alone)
+            val bl = brilliantArrow(b, pick)
+            if (brilliantPick && bl != null) overlay.update(View(g, wb, mine = listOf(bl), title = "brilliant move !!"))
+            else overlay.update(View(g, wb, title = hiddenTitle(true)))
             return
         }
         val shown = if (hint && st.hideArrows) maxOf(st.lines, 3) else st.lines
@@ -500,9 +507,9 @@ class Helper(
         val lines: List<Line> = snap?.lines ?: emptyList()
         val best = lines.firstOrNull()?.score
         val arrows = ArrayList<MoveArrow>()
-        val pick = illPick
-        // illusion's pick first (with stockfish's grade when stockfish has a line for it)
-        if (pick != null && pick.length >= 4) {
+        // illusion's pick first (with stockfish's grade when stockfish has a line for it). with stockfish as the
+        // engine, illusion only adds its pick when it's a brilliant move
+        if (pick != null && pick.length >= 4 && (st.engine == "illusion" || brilliantPick)) {
             val l = lines.firstOrNull { it.move == pick }
             val grade = if (l != null && best != null) Grade.of(best - l.score) else Grade.DECENT
             val eval = l?.let { Cand(it.move, it.score, it.mate, 0, 0).text } ?: "…"
@@ -522,6 +529,18 @@ class Helper(
         val title = (if (hint) "hint · ${left}s · " else "") +
             (if (st.engine == "illusion") "illusion" else "stockfish") + (snap?.let { " · depth ${it.depth}" } ?: "")
         overlay.update(View(g, wb, mine = arrows, title = title, evalShare = share, evalText = text))
+    }
+
+    /** illusion's brilliant pick as a blue "!!" arrow (null when stockfish thinks it's a blunder) */
+    private fun brilliantArrow(b: Board, pick: String?): MoveArrow? {
+        if (pick == null || pick.length < 4) return null
+        val lines = sfSnap?.lines ?: emptyList()
+        val best = lines.firstOrNull()?.score
+        val l = lines.firstOrNull { it.move == pick }
+        val grade = if (l != null && best != null) Grade.of(best - l.score) else Grade.DECENT
+        if (grade == Grade.BLUNDER) return null
+        val eval = l?.let { Cand(it.move, it.score, it.mate, 0, 0).text } ?: "…"
+        return MoveArrow(pick.substring(0, 2), pick.substring(2, 4), grade, 1, Game.san(b.fen, pick), eval, brilliant = true)
     }
 
     private fun showGuesses(b: Board, g: BoardGeom, wb: Boolean, my: Int) {

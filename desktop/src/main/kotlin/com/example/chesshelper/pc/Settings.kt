@@ -26,6 +26,7 @@ class Settings {
     var tolerance = 60
     var hunt = 30
     var illusionMs = 400            // illusion's think for its pick in human mode (it needs a clock for traps)
+    var alwaysBrilliant = false     // a brilliant move (blue "!!") always shows, even with the arrows hidden or stockfish as the engine
     var hideArrows = false          // no arrows until you ask for a hint (F2 or the hint button)
 
     private val file = File(Store.dir, "settings.properties")
@@ -49,6 +50,7 @@ class Settings {
         hunt = p.getProperty("hunt")?.toIntOrNull() ?: hunt
         illusionMs = p.getProperty("illusionMs")?.toIntOrNull() ?: illusionMs
         hideArrows = p.getProperty("hideArrows")?.toBoolean() ?: hideArrows
+        alwaysBrilliant = p.getProperty("alwaysBrilliant")?.toBoolean() ?: alwaysBrilliant
     }
 
     fun save() {
@@ -57,7 +59,7 @@ class Settings {
         p["guessWith"] = guessWith; p["maiaHost"] = maiaHost; p["botElo"] = "$botElo"; p["humanMode"] = "$humanMode"
         p["oppElo"] = "$oppElo"; p["aggression"] = "$aggression"; p["contempt"] = "$contempt"
         p["tolerance"] = "$tolerance"; p["hunt"] = "$hunt"; p["illusionMs"] = "$illusionMs"
-        p["hideArrows"] = "$hideArrows"
+        p["hideArrows"] = "$hideArrows"; p["alwaysBrilliant"] = "$alwaysBrilliant"
         try { file.outputStream().use { p.store(it, "chess helper") } } catch (_: Exception) {}
     }
 }

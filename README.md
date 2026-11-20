@@ -136,7 +136,7 @@ desktop/ holds the pc version. it reads the board on your screen with the same b
 - the bot's turn: its 3 likely moves (dashed, with odds when maia3 guesses) and your premove answer to each (same color and number)
 - illusion: its pick first ("*", "trap", or a blue "!!" for a real sacrifice). in human mode it thinks on a short clock (traps and sacrifices need one) while stockfish's arrows show at once
 - maia3: run tools/maia3_server.py on the pc and pick "guess with: maia3"
-- hide arrows: nothing is drawn until you ask. press F2 (works while the game has focus) or the hint button and your best few moves show for 10 seconds. asked on the bot's turn, the hint shows as soon as it's your turn
+- hide arrows: nothing is drawn until you ask (except brilliant moves when "always show brilliant moves" is on, which also works with stockfish as the engine). press F2 (works while the game has focus) or the hint button and your best few moves show for 10 seconds. asked on the bot's turn, the hint shows as soon as it's your turn
 - game review: when a game ends (checkmate or a draw on the board, or the next game starts) the review button lights up; a mate opens the review by itself. stockfish goes over every move: your accuracy, your blunders, mistakes and inaccuracies, and the better move on a board for each. for a game that ended by resigning or time, press review game once it's over. every game is also saved as a pgn in %APPDATA%\ChessHelper\games
 - the piece shapes are learned at a game's start position and saved in %APPDATA%\ChessHelper, like the settings
 
