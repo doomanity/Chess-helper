@@ -193,7 +193,12 @@ class Tracker(var iAmWhite: Boolean, private val myTurnAtStart: Boolean) {
      * two reads in a row while our board says something else, the board becomes what the read shows. so a wrong
      * board can't stay wrong, and losing track never needs the AI
      */
-    fun update(screen: IntArray, reads: Array<SquareRead>? = null, nowMs: Long = 0L): Step {
+    fun update(screen0: IntArray, reads: Array<SquareRead>? = null, nowMs: Long = 0L): Step {
+        // a shiny spot on a metal or wood square can look like a piece. once the pieces are learned, something that
+        // looks like none of them is not a piece
+        val screen = if (reads != null && templates.complete) IntArray(64) { i ->
+            if (screen0[i] != BoardVision.EMPTY && templates.nearest(reads[i].mask) > PieceTemplates.NOT_A_PIECE) BoardVision.EMPTY else screen0[i]
+        } else screen0
         val before = board?.let { Board().apply { loadFromFen(it.fen) } }
         val step = follow(screen, reads, nowMs)
         if (reads == null || step == Step.HOLD || step == Step.STARTED) {

@@ -55,7 +55,7 @@ class Overlay(
 
     /** true when screen capture can't see the overlay (else it is hidden for a moment while the board is read) */
     var hiddenFromCapture = false
-        private set
+        internal set
 
     private val panel by lazy { object : JPanel() {
         init { isOpaque = false }
@@ -80,8 +80,12 @@ class Overlay(
         }
     }
 
+    /** a test can watch every update */
+    var onUpdate: ((View) -> Unit)? = null
+
     fun update(v: View) {
         view = v
+        onUpdate?.invoke(v)
         panel.repaint()
     }
 

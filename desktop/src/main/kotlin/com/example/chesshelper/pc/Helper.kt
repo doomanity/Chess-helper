@@ -24,14 +24,18 @@ import java.util.concurrent.atomic.AtomicInteger
  * and move follower), and keep the engines thinking about the position on screen. your turn: your best moves
  * stream in live. the bot's turn: its likely moves stream in, then your premove answer to each
  */
-class Helper(private val st: Settings, private val overlay: Overlay, private val report: (String) -> Unit) {
+class Helper(
+    private val st: Settings, private val overlay: Overlay, private val report: (String) -> Unit,
+    // where the screen pictures come from (the real screen; a test feeds recorded frames)
+    private val source: (() -> Triple<IntArray, Int, Int>)? = null
+) {
     private fun status(t: String) {
         lastStatus = t
         report(t)
     }
 
-    private val robot = Robot()
-    private val screen: Rectangle = GraphicsEnvironment.getLocalGraphicsEnvironment().defaultScreenDevice.defaultConfiguration.bounds
+    private val robot by lazy { Robot() }
+    private val screen: Rectangle by lazy { GraphicsEnvironment.getLocalGraphicsEnvironment().defaultScreenDevice.defaultConfiguration.bounds }
     private val engineDir: File = appDir()
 
     @Volatile var paused = false
@@ -163,13 +167,15 @@ class Helper(private val st: Settings, private val overlay: Overlay, private val
             } catch (e: InterruptedException) {
                 return
             } catch (e: Exception) {
-                status("error: ${e.message}")
+                status("error: ${e::class.java.simpleName} ${e.message ?: ""}")
+                e.printStackTrace()
                 Thread.sleep(500)
             }
         }
     }
 
     private fun grab(): Triple<IntArray, Int, Int> {
+        source?.let { return it() }
         val img: BufferedImage = robot.createScreenCapture(screen)
         val w = img.width
         val h = img.height
@@ -271,6 +277,16 @@ class Helper(private val st: Settings, private val overlay: Overlay, private val
             try { Store.shapes.writeText(tracker.templates.encode()) } catch (_: Exception) {}
         }
         val b = tracker.board
+        if (step == Tracker.Step.UNREADABLE || step == Tracker.Step.RESYNC) {
+            // lost track: old arrows would point at a position that isn't there any more, take them off
+            gen.incrementAndGet()
+            sf?.stop()
+            ill?.stop()
+            overlay.clear()
+            lastFen = null
+            status("lost track of the moves, reading the board again · shapes ${tracker.templates.known}/12")
+            return
+        }
         if (b == null) {
             overlay.clear()
             status(if (!tracker.templates.complete) "start a game from the start position once, so I learn this board's pieces"

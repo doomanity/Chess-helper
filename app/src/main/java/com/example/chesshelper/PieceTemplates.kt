@@ -73,6 +73,14 @@ class PieceTemplates {
         return out
     }
 
+    /** how far this shape is from every picture we have, any color or type (a big number: not a piece at all) */
+    fun nearest(mask: LongArray?): Int {
+        if (mask == null) return Int.MAX_VALUE
+        var d = Int.MAX_VALUE
+        for (l in lib.values) for (m in l) d = minOf(d, ham(m, mask))
+        return d
+    }
+
     /** all six types, the most likely first (even when we are not sure) */
     fun ranked(colour: Int, mask: LongArray?): List<Int> {
         val d = distances(colour, mask)
@@ -111,5 +119,7 @@ class PieceTemplates {
     companion object {
         const val MAX_DIST = 110
         const val MIN_MARGIN = 14
+        // further than this from every learned piece: a shine or a mark on the square, not a piece
+        const val NOT_A_PIECE = 160
     }
 }

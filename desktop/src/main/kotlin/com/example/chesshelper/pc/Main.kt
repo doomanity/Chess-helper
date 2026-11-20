@@ -24,7 +24,7 @@ fun main() {
         win.show()
     }
     overlay.show()
-    helper = Helper(st, overlay) { win.status(it) }
+    helper = Helper(st, overlay, { win.status(it) })
     win.pauseButton.addActionListener {
         helper.paused = !helper.paused
         win.pauseButton.text = if (helper.paused) "resume" else "pause"
